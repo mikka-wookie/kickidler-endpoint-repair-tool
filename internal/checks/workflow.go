@@ -75,7 +75,13 @@ func FormatConsoleSummary(report detector.DetectionReport, reportDir string) str
 func FormatSummary(report detector.DetectionReport, reportDir string) string {
 	var b strings.Builder
 	b.WriteString("Kigrepair Check Summary\n\n")
-	b.WriteString("Health: " + string(report.Health) + "\n\n")
+	b.WriteString("Health: " + string(report.Health) + "\n")
+	b.WriteString("Install mode: " + string(report.InstallMode) + "\n")
+	b.WriteString("Install root: " + valueOrDash(report.InstallRoot) + "\n")
+	b.WriteString("Primary service: " + valueOrDash(report.PrimaryService) + "\n")
+	b.WriteString("Service status: " + serviceStatus(report) + "\n")
+	b.WriteString("Service executable: " + valueOrDash(report.ServiceExecutablePath) + "\n")
+	b.WriteString("Defender exclusion: " + defenderExclusionStatus(report) + "\n\n")
 	if len(report.Issues) > 0 {
 		b.WriteString("Issues:\n")
 		for _, issue := range report.Issues {
@@ -94,4 +100,41 @@ func FormatSummary(report detector.DetectionReport, reportDir string) string {
 	b.WriteString(reportDir)
 	b.WriteString("\n")
 	return b.String()
+}
+
+func valueOrDash(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func serviceStatus(report detector.DetectionReport) string {
+	if report.PrimaryService == "" {
+		return "-"
+	}
+	for _, service := range report.Services {
+		if strings.EqualFold(service.Name, report.PrimaryService) {
+			if service.Status != "" {
+				return service.Status
+			}
+			if service.Exists {
+				return "exists"
+			}
+		}
+	}
+	return "-"
+}
+
+func defenderExclusionStatus(report detector.DetectionReport) string {
+	if !report.Defender.Available {
+		return "unavailable"
+	}
+	if len(report.MissingDefenderPaths) > 0 {
+		return "missing"
+	}
+	if len(report.RequiredDefenderPaths) > 0 {
+		return "present"
+	}
+	return "-"
 }

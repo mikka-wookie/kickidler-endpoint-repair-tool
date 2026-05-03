@@ -78,19 +78,9 @@ func queryProcesses() ([]cimProcess, error) {
 }
 
 func knownProcessNames() []string {
-	return []string{
-		"grabber.exe",
-		"grabberAgent.exe",
-		"grabberSubAgent.exe",
-		"grabberSubagent.exe",
-		"grabber2.exe",
-		"ngsAgent.exe",
-		"ngsSubAgent.exe",
-		"ngsSubagent.exe",
-		"tlshost.exe",
-		"tlsservice.exe",
-		"tlssubservice.exe",
-	}
+	names := append([]string{}, standardExecutableCandidates...)
+	names = append(names, hiddenWMIExecutableCandidates...)
+	return names
 }
 
 func requiredWMIFilePaths(system SystemState) []string {

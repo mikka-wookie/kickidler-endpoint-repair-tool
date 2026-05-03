@@ -13,6 +13,7 @@ const (
 )
 
 func CalculateHealth(report DetectionReport) (GrabberHealthStatus, []string, []string) {
+	report = EnrichDetectionReport(report)
 	var issues []string
 	var recommendations []string
 
@@ -22,74 +23,83 @@ func CalculateHealth(report DetectionReport) (GrabberHealthStatus, []string, []s
 			[]string{"Review repair.log and run check again from an elevated shell"}
 	}
 
-	wmiService := findService(report.Services, wmiProviderService)
-	wmiServiceExists := wmiService != nil && wmiService.Exists
-	wmiServiceRunning := wmiServiceExists && strings.EqualFold(wmiService.Status, "running")
-	wmiImagePath := expectedWMIServiceImagePath(report.System)
-	requiredFiles := requiredWMIFilePaths(report.System)
+	primaryService := findService(report.Services, report.PrimaryService)
+	primaryServiceExists := primaryService != nil && primaryService.Exists
+	primaryServiceRunning := primaryServiceExists && strings.EqualFold(primaryService.Status, "running")
+	requiredFiles := requiredFilePathsForInstall(report)
 	missingRequiredFiles := missingFiles(report.Files, requiredFiles)
 	allRequiredFilesExist := len(missingRequiredFiles) == 0
-	wmiExclusionMissing := containsPath(report.Defender.MissingPaths, filepathDir(wmiImagePath))
 	anyServiceExists := anyExistingService(report.Services)
 	anyFolderExists := anyExistingFileType(report.Files, "folder")
+	anyExecutableExists := anyExistingFileType(report.Files, "file")
 	anyRegistryExists := anyExistingRegistry(report.Registry)
-	msiRegistryExists := anyExistingMSIRegistry(report.Registry)
 
-	if !anyServiceExists && !anyFolderExists && !anyRegistryExists {
+	if !anyServiceExists && !anyFolderExists && !anyExecutableExists && !anyRegistryExists {
 		return GrabberHealthNotInstalled, issues, recommendations
 	}
 
 	for _, path := range missingRequiredFiles {
 		issues = append(issues, "Missing required file: "+path)
 	}
-	if wmiServiceExists && !wmiServiceRunning {
-		issues = append(issues, "WmiProviderSE service exists but is not running")
+	if primaryServiceExists && !primaryServiceRunning {
+		issues = append(issues, "Service "+primaryService.Name+" exists but is not running")
 	}
-	if report.Defender.Available && wmiExclusionMissing {
-		issues = append(issues, "Missing Defender exclusion: "+filepathDir(wmiImagePath))
+	if report.Defender.Available && report.InstallRoot != "" {
+		for _, path := range report.MissingDefenderPaths {
+			issues = append(issues, "Missing Defender exclusion: "+path)
+		}
 	}
 	if !report.Defender.Available {
 		issues = append(issues, "Defender exclusion could not be verified")
 		recommendations = appendRecommendation(recommendations, "Verify Defender exclusions manually")
 	}
 
-	if wmiServiceExists && wmiServiceRunning && wmiService.ExpectedImagePathMatch && allRequiredFilesExist {
-		if !report.Defender.Available || !wmiExclusionMissing {
-			return GrabberHealthHealthy, issues, recommendations
-		}
+	if anyServiceExists && report.PrimaryService == "" {
+		issues = append(issues, "Known service exists but install root could not be resolved")
+		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --installer .\\grabber.msi")
+		return GrabberHealthBroken, issues, recommendations
 	}
 
-	if wmiServiceExists && len(missingRequiredFiles) > 0 {
+	if primaryServiceExists && report.ServiceExecutablePath == "" {
+		issues = append(issues, "Service "+primaryService.Name+" ImagePath could not be parsed")
+		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --installer .\\grabber.msi")
+		return GrabberHealthBroken, issues, recommendations
+	}
+
+	if primaryServiceExists && report.InstallRoot == "" {
+		issues = append(issues, "Service "+primaryService.Name+" install root could not be resolved")
+		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --installer .\\grabber.msi")
+		return GrabberHealthBroken, issues, recommendations
+	}
+
+	if primaryServiceExists && !allRequiredFilesExist {
 		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --installer .\\grabber.msi")
 		recommendations = appendRecommendation(recommendations, "Run cleanup if reinstall fails")
 		return GrabberHealthBroken, issues, recommendations
 	}
-	if wmiServiceExists && wmiService.ExpectedImagePathMatch && !fileExists(report.Files, wmiImagePath) {
-		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --installer .\\grabber.msi")
-		return GrabberHealthBroken, issues, recommendations
-	}
-	if msiRegistryExists && len(missingRequiredFiles) > 0 {
-		issues = append(issues, "MSI registry entries exist but required files are missing")
-		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --installer .\\grabber.msi")
-		return GrabberHealthBroken, issues, recommendations
-	}
-	if report.Defender.Available && wmiExclusionMissing && len(missingRequiredFiles) > 0 {
-		recommendations = appendRecommendation(recommendations, "Verify Defender exclusions manually")
-		return GrabberHealthBroken, issues, recommendations
+
+	if report.Defender.Available && report.InstallRoot != "" && len(report.MissingDefenderPaths) > 0 {
+		recommendations = appendRecommendation(recommendations, "Run defender ensure or repair workflow to add the exclusion")
 	}
 
-	if !anyServiceExists && anyFolderExists {
-		issues = append(issues, "Known folders remain without service")
+	if primaryServiceExists && primaryServiceRunning && allRequiredFilesExist && report.InstallRoot != "" {
+		return GrabberHealthHealthy, issues, recommendations
+	}
+
+	if !anyServiceExists && anyExecutableExists {
+		issues = append(issues, "Known executable files remain without service")
 		recommendations = appendRecommendation(recommendations, "Run cleanup if reinstall fails")
 		return GrabberHealthPartiallyRemoved, issues, recommendations
 	}
+
 	if !anyServiceExists && anyRegistryExists {
 		issues = append(issues, "Registry leftovers detected without service")
 		recommendations = appendRecommendation(recommendations, "Run cleanup if reinstall fails")
 		return GrabberHealthPartiallyRemoved, issues, recommendations
 	}
-	if !wmiServiceExists && (fileExists(report.Files, filepathDir(wmiImagePath)) || programDataFolderExists(report)) {
-		issues = append(issues, "WMI or ProgramData remnants detected without service")
+
+	if !anyServiceExists && anyFolderExists {
+		issues = append(issues, "Known folders remain without service")
 		recommendations = appendRecommendation(recommendations, "Run cleanup if reinstall fails")
 		return GrabberHealthPartiallyRemoved, issues, recommendations
 	}

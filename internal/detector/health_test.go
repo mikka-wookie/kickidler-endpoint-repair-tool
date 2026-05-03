@@ -1,47 +1,69 @@
 package detector
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestCalculateHealthHealthyWithUnavailableDefenderWarning(t *testing.T) {
-	report := baseReport()
-	report.Services = []ServiceState{{
-		Name:                   wmiProviderService,
-		Exists:                 true,
-		Status:                 "running",
-		ImagePath:              `C:\Windows\System32\wmi\bin\svchost.exe`,
-		ExpectedImagePathMatch: true,
-	}}
-	report.Files = requiredExistingFiles(report.System)
-	report.Defender = DefenderState{Available: false}
+func TestCalculateHealthHealthyStandardInstall(t *testing.T) {
+	report := standardTLSReport(true, []string{`C:\Program Files\TeleLinkSoft`})
 
-	health, issues, recommendations := CalculateHealth(report)
+	health, _, _ := CalculateHealth(report)
 
 	if health != GrabberHealthHealthy {
 		t.Fatalf("health = %s, want %s", health, GrabberHealthHealthy)
 	}
-	if !containsString(issues, "Defender exclusion could not be verified") {
-		t.Fatalf("expected Defender verification issue, got %#v", issues)
-	}
-	if !containsString(recommendations, "Verify Defender exclusions manually") {
-		t.Fatalf("expected Defender recommendation, got %#v", recommendations)
+	enriched := EnrichDetectionReport(report)
+	if enriched.InstallMode != InstallModeStandard {
+		t.Fatalf("mode = %s, want %s", enriched.InstallMode, InstallModeStandard)
 	}
 }
 
-func TestCalculateHealthBrokenWhenServiceExistsAndRequiredFileMissing(t *testing.T) {
-	report := baseReport()
-	report.Services = []ServiceState{{
-		Name:                   wmiProviderService,
-		Exists:                 true,
-		Status:                 "stopped",
-		ImagePath:              `C:\Windows\System32\wmi\bin\svchost.exe`,
-		ExpectedImagePathMatch: true,
-	}}
-	report.Files = []FileState{
-		{Path: `C:\Windows\System32\wmi\bin\svchost.exe`, Exists: false, Type: "file"},
-		{Path: `C:\Windows\System32\wmi\bin\WmiPrvSE.exe`, Exists: true, Type: "file"},
-		{Path: `C:\Windows\System32\wmi\bin\RuntimeBroker.exe`, Exists: true, Type: "file"},
+func TestCalculateHealthStandardInstallMissingDefenderExclusionStillHealthy(t *testing.T) {
+	report := standardTLSReport(true, nil)
+
+	health, issues, _ := CalculateHealth(report)
+
+	if health != GrabberHealthHealthy {
+		t.Fatalf("health = %s, want %s", health, GrabberHealthHealthy)
 	}
-	report.Defender = DefenderState{Available: true, MissingPaths: []string{`C:\Windows\System32\wmi`}}
+	if !containsString(issues, `Missing Defender exclusion: C:\Program Files\TeleLinkSoft`) {
+		t.Fatalf("expected missing Defender issue, got %#v", issues)
+	}
+}
+
+func TestCalculateHealthBrokenStandardInstallMissingServiceExecutable(t *testing.T) {
+	report := standardTLSReport(false, []string{`C:\Program Files\TeleLinkSoft`})
+
+	health, issues, _ := CalculateHealth(report)
+
+	if health != GrabberHealthBroken {
+		t.Fatalf("health = %s, want %s", health, GrabberHealthBroken)
+	}
+	if !containsString(issues, `Missing required file: C:\Program Files\TeleLinkSoft\tlsservice.exe`) {
+		t.Fatalf("expected missing service executable issue, got %#v", issues)
+	}
+	if containsSubstring(issues, `C:\Windows\System32\wmi\bin`) {
+		t.Fatalf("standard install should not mention WMI required files, got %#v", issues)
+	}
+}
+
+func TestCalculateHealthHealthyHiddenWMIInstall(t *testing.T) {
+	report := hiddenWMIReport(true, []string{`C:\Windows\System32\wmi`})
+
+	health, _, _ := CalculateHealth(report)
+
+	if health != GrabberHealthHealthy {
+		t.Fatalf("health = %s, want %s", health, GrabberHealthHealthy)
+	}
+	enriched := EnrichDetectionReport(report)
+	if enriched.InstallMode != InstallModeHiddenWMI {
+		t.Fatalf("mode = %s, want %s", enriched.InstallMode, InstallModeHiddenWMI)
+	}
+}
+
+func TestCalculateHealthBrokenHiddenWMIInstallMissingServiceExecutable(t *testing.T) {
+	report := hiddenWMIReport(false, []string{`C:\Windows\System32\wmi`})
 
 	health, issues, _ := CalculateHealth(report)
 
@@ -49,7 +71,7 @@ func TestCalculateHealthBrokenWhenServiceExistsAndRequiredFileMissing(t *testing
 		t.Fatalf("health = %s, want %s", health, GrabberHealthBroken)
 	}
 	if !containsString(issues, `Missing required file: C:\Windows\System32\wmi\bin\svchost.exe`) {
-		t.Fatalf("expected missing file issue, got %#v", issues)
+		t.Fatalf("expected missing WMI service executable issue, got %#v", issues)
 	}
 }
 
@@ -80,6 +102,27 @@ func TestCalculateHealthNotInstalled(t *testing.T) {
 	}
 }
 
+func TestCalculateHealthFallbackFileScanStandardInstall(t *testing.T) {
+	report := baseReport()
+	report.Files = []FileState{
+		{Path: `C:\Program Files\TeleLinkSoft`, Exists: true, Type: "folder"},
+		{Path: `C:\Program Files\TeleLinkSoft\tlsservice.exe`, Exists: true, Type: "file"},
+	}
+
+	health, _, _ := CalculateHealth(report)
+	enriched := EnrichDetectionReport(report)
+
+	if health != GrabberHealthPartiallyRemoved {
+		t.Fatalf("health = %s, want %s", health, GrabberHealthPartiallyRemoved)
+	}
+	if enriched.InstallMode != InstallModeStandard {
+		t.Fatalf("mode = %s, want %s", enriched.InstallMode, InstallModeStandard)
+	}
+	if enriched.InstallRoot != `C:\Program Files\TeleLinkSoft` {
+		t.Fatalf("root = %s, want Program Files root", enriched.InstallRoot)
+	}
+}
+
 func TestMissingPathsNormalizesCaseAndSlashes(t *testing.T) {
 	missing := MissingPaths(
 		[]string{`C:\Program Files\TeleLinkSoft`, `C:\Windows\System32\wmi`},
@@ -88,6 +131,14 @@ func TestMissingPathsNormalizesCaseAndSlashes(t *testing.T) {
 
 	if len(missing) != 1 || missing[0] != `C:\Windows\System32\wmi` {
 		t.Fatalf("missing = %#v", missing)
+	}
+}
+
+func TestParseServiceExecutablePathHandlesQuotesArgumentsAndEnvironment(t *testing.T) {
+	t.Setenv("ProgramFiles", `C:\Program Files`)
+	got := parseServiceExecutablePath(`"%ProgramFiles%\TeleLinkSoftHelper\tlshost.exe" --service`)
+	if got != `C:\Program Files\TeleLinkSoftHelper\tlshost.exe` {
+		t.Fatalf("path = %q", got)
 	}
 }
 
@@ -104,12 +155,44 @@ func TestPathsEqualNormalizesWindowsEnvironmentVariables(t *testing.T) {
 	}
 }
 
+func standardTLSReport(serviceExecutableExists bool, exclusions []string) DetectionReport {
+	report := baseReport()
+	report.Services = []ServiceState{
+		{Name: "ngs", Exists: false},
+		{Name: "tls", Exists: true, Status: "running", ImagePath: `C:\Program Files\TeleLinkSoft\tlsservice.exe`},
+		{Name: wmiProviderService, Exists: false},
+	}
+	report.Files = []FileState{
+		{Path: `C:\Program Files\TeleLinkSoft`, Exists: true, Type: "folder"},
+		{Path: `C:\Program Files\TeleLinkSoft\tlsservice.exe`, Exists: serviceExecutableExists, Type: "file"},
+	}
+	report.Defender = DefenderState{Available: true, ExclusionPaths: exclusions}
+	return report
+}
+
+func hiddenWMIReport(serviceExecutableExists bool, exclusions []string) DetectionReport {
+	report := baseReport()
+	report.Services = []ServiceState{
+		{Name: "ngs", Exists: false},
+		{Name: "tls", Exists: false},
+		{Name: wmiProviderService, Exists: true, Status: "running", ImagePath: `C:\Windows\System32\wmi\bin\svchost.exe`},
+	}
+	report.Files = []FileState{
+		{Path: `C:\Windows\System32\wmi`, Exists: true, Type: "folder"},
+		{Path: `C:\Windows\System32\wmi\bin`, Exists: true, Type: "folder"},
+		{Path: `C:\Windows\System32\wmi\bin\svchost.exe`, Exists: serviceExecutableExists, Type: "file"},
+	}
+	report.Defender = DefenderState{Available: true, ExclusionPaths: exclusions}
+	return report
+}
+
 func baseReport() DetectionReport {
 	return DetectionReport{
 		System: SystemState{
-			SystemRoot:   `C:\Windows`,
-			ProgramData:  `C:\ProgramData`,
-			ProgramFiles: `C:\Program Files`,
+			SystemRoot:      `C:\Windows`,
+			ProgramData:     `C:\ProgramData`,
+			ProgramFiles:    `C:\Program Files`,
+			ProgramFilesX86: `C:\Program Files (x86)`,
 		},
 		Services: []ServiceState{
 			{Name: "ngs", Exists: false},
@@ -120,17 +203,18 @@ func baseReport() DetectionReport {
 	}
 }
 
-func requiredExistingFiles(system SystemState) []FileState {
-	files := make([]FileState, 0, 3)
-	for _, path := range requiredWMIFilePaths(system) {
-		files = append(files, FileState{Path: path, Exists: true, Type: "file"})
-	}
-	return files
-}
-
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSubstring(values []string, want string) bool {
+	for _, value := range values {
+		if strings.Contains(value, want) {
 			return true
 		}
 	}

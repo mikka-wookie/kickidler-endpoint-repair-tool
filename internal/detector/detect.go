@@ -11,17 +11,27 @@ import (
 )
 
 type DetectionReport struct {
-	GeneratedAt     time.Time           `json:"generated_at"`
-	IsAdmin         bool                `json:"is_admin"`
-	System          SystemState         `json:"system"`
-	Services        []ServiceState      `json:"services"`
-	Files           []FileState         `json:"files"`
-	Processes       []ProcessState      `json:"processes"`
-	Registry        []RegistryState     `json:"registry"`
-	Defender        DefenderState       `json:"defender"`
-	Health          GrabberHealthStatus `json:"health"`
-	Issues          []string            `json:"issues"`
-	Recommendations []string            `json:"recommendations"`
+	GeneratedAt             time.Time           `json:"generated_at"`
+	IsAdmin                 bool                `json:"is_admin"`
+	System                  SystemState         `json:"system"`
+	InstallMode             InstallMode         `json:"install_mode"`
+	InstallRoot             string              `json:"install_root,omitempty"`
+	BinaryDir               string              `json:"binary_dir,omitempty"`
+	ServiceSource           string              `json:"service_source,omitempty"`
+	PrimaryService          string              `json:"primary_service,omitempty"`
+	PrimaryServiceImagePath string              `json:"primary_service_image_path,omitempty"`
+	ServiceExecutablePath   string              `json:"service_executable_path,omitempty"`
+	ServiceExecutableExists bool                `json:"service_executable_exists"`
+	RequiredDefenderPaths   []string            `json:"required_defender_paths,omitempty"`
+	MissingDefenderPaths    []string            `json:"missing_defender_paths,omitempty"`
+	Services                []ServiceState      `json:"services"`
+	Files                   []FileState         `json:"files"`
+	Processes               []ProcessState      `json:"processes"`
+	Registry                []RegistryState     `json:"registry"`
+	Defender                DefenderState       `json:"defender"`
+	Health                  GrabberHealthStatus `json:"health"`
+	Issues                  []string            `json:"issues"`
+	Recommendations         []string            `json:"recommendations"`
 }
 
 type SystemState struct {
@@ -47,7 +57,11 @@ func Detect() DetectionReport {
 	report.Files = DetectFiles(system)
 	report.Processes = DetectProcesses(system)
 	report.Registry = DetectRegistry()
-	report.Defender = DetectDefender(system)
+	report = EnrichDetectionReport(report)
+	report.Files = ensureFileState(report.Files, report.ServiceExecutablePath)
+	report = EnrichDetectionReport(report)
+	report.Defender = DetectDefender(system, report.InstallMode, report.InstallRoot)
+	report = EnrichDetectionReport(report)
 	report.Health, report.Issues, report.Recommendations = CalculateHealth(report)
 	return report
 }

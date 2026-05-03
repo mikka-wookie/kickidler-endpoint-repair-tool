@@ -22,9 +22,8 @@ type ServiceState struct {
 }
 
 func DetectServices(system SystemState) []ServiceState {
-	names := []string{"ngs", "tls", wmiProviderService}
-	services := make([]ServiceState, 0, len(names))
-	for _, name := range names {
+	services := make([]ServiceState, 0, len(knownServiceNames))
+	for _, name := range knownServiceNames {
 		state := detectService(name)
 		if strings.EqualFold(name, wmiProviderService) {
 			state.ExpectedImagePathMatch = pathsEqual(state.ImagePath, expectedWMIServiceImagePath(system))

@@ -3,7 +3,6 @@ package detector
 import (
 	"encoding/json"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -11,13 +10,17 @@ type DefenderState struct {
 	Available      bool     `json:"available"`
 	ExclusionPaths []string `json:"exclusion_paths"`
 	RequiredPaths  []string `json:"required_paths"`
+	CandidatePaths []string `json:"candidate_required_paths,omitempty"`
 	MissingPaths   []string `json:"missing_paths"`
 	Error          string   `json:"error,omitempty"`
 }
 
-func DetectDefender(system SystemState) DefenderState {
+func DetectDefender(system SystemState, mode InstallMode, installRoot string) DefenderState {
 	state := DefenderState{
-		RequiredPaths: requiredDefenderPaths(system),
+		RequiredPaths: requiredDefenderPathsForInstall(system, mode, installRoot),
+	}
+	if installRoot == "" {
+		state.CandidatePaths = append([]string{}, state.RequiredPaths...)
 	}
 	paths, err := queryDefenderExclusions()
 	if err != nil {
@@ -30,16 +33,6 @@ func DetectDefender(system SystemState) DefenderState {
 	state.ExclusionPaths = paths
 	state.MissingPaths = MissingPaths(state.RequiredPaths, paths)
 	return state
-}
-
-func requiredDefenderPaths(system SystemState) []string {
-	return []string{
-		filepath.Join(system.ProgramFiles, "TeleLinkSoft"),
-		filepath.Join(system.ProgramFiles, "TeleLinkSoftHelper"),
-		filepath.Join(system.ProgramFilesX86, "TeleLinkSoft"),
-		filepath.Join(system.ProgramFilesX86, "TeleLinkSoftHelper"),
-		filepath.Join(system.SystemRoot, "System32", "wmi"),
-	}
 }
 
 func queryDefenderExclusions() ([]string, error) {

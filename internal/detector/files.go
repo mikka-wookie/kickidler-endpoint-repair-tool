@@ -16,17 +16,25 @@ type FileState struct {
 }
 
 func DetectFiles(system SystemState) []FileState {
-	targets := []FileState{
-		{Path: filepath.Join(system.ProgramFiles, "TeleLinkSoft"), Type: "folder"},
-		{Path: filepath.Join(system.ProgramFiles, "TeleLinkSoftHelper"), Type: "folder"},
-		{Path: filepath.Join(system.ProgramFilesX86, "TeleLinkSoft"), Type: "folder"},
-		{Path: filepath.Join(system.ProgramFilesX86, "TeleLinkSoftHelper"), Type: "folder"},
-		{Path: filepath.Join(system.ProgramData, "E891C8F2-6D3B-5E17-7F3C-9A1D4E2B8C60"), Type: "folder"},
-		{Path: filepath.Join(system.SystemRoot, "System32", "wmi"), Type: "folder"},
-		{Path: filepath.Join(system.SystemRoot, "System32", "wmi", "bin"), Type: "folder"},
-		{Path: filepath.Join(system.SystemRoot, "System32", "wmi", "bin", "svchost.exe"), Type: "file"},
-		{Path: filepath.Join(system.SystemRoot, "System32", "wmi", "bin", "WmiPrvSE.exe"), Type: "file"},
-		{Path: filepath.Join(system.SystemRoot, "System32", "wmi", "bin", "RuntimeBroker.exe"), Type: "file"},
+	targets := make([]FileState, 0)
+	seen := map[string]bool{}
+	add := func(path, typ string) {
+		if path == "." || path == "" || seen[normalizePath(path)] {
+			return
+		}
+		seen[normalizePath(path)] = true
+		targets = append(targets, FileState{Path: path, Type: typ})
+	}
+	for _, root := range knownInstallRoots(system) {
+		mode := modeForInstallRoot(system, root)
+		binaryDir := binaryDirForMode(mode, root)
+		add(root, "folder")
+		if !pathsEqual(binaryDir, root) {
+			add(binaryDir, "folder")
+		}
+		for _, exe := range executableCandidatesForMode(mode) {
+			add(filepath.Join(binaryDir, exe), "file")
+		}
 	}
 	for i := range targets {
 		targets[i] = statFileState(targets[i])
@@ -53,4 +61,16 @@ func statFileState(state FileState) FileState {
 		state.Size = info.Size()
 	}
 	return state
+}
+
+func ensureFileState(files []FileState, path string) []FileState {
+	if path == "" {
+		return files
+	}
+	for _, file := range files {
+		if pathsEqual(file.Path, path) {
+			return files
+		}
+	}
+	return append(files, statFileState(FileState{Path: path, Type: "file"}))
 }
