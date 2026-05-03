@@ -111,14 +111,18 @@ func installCommand(opts *globalOptions) *cobra.Command {
 
 func defenderCommand(opts *globalOptions) *cobra.Command {
 	var ensure bool
+	var yes bool
+	var allKnownPaths bool
 	cmd := &cobra.Command{
 		Use:   "defender",
-		Short: "Inspect placeholder Defender configuration",
+		Short: "Inspect or ensure Windows Defender exclusions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, defender.DefenderWorkflow{Ensure: ensure})
+			return runWorkflow(opts, defender.DefenderWorkflow{Ensure: ensure, Yes: yes, AllKnownPaths: allKnownPaths})
 		},
 	}
-	cmd.Flags().BoolVar(&ensure, "ensure", false, "placeholder flag for future Defender exclusion enforcement")
+	cmd.Flags().BoolVar(&ensure, "ensure", false, "add missing Defender exclusions")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm Defender exclusion changes without prompting")
+	cmd.Flags().BoolVar(&allKnownPaths, "all-known-paths", false, "with --ensure, add all configured Defender exclusion paths")
 	return cmd
 }
 
