@@ -23,12 +23,15 @@ const (
 )
 
 type CleanupAction struct {
-	Type     CleanupActionType `json:"type"`
-	Target   string            `json:"target"`
-	Reason   string            `json:"reason"`
-	Safe     bool              `json:"safe"`
-	WouldRun bool              `json:"would_run"`
-	Error    string            `json:"error,omitempty"`
+	Type           CleanupActionType `json:"type"`
+	Target         string            `json:"target"`
+	Reason         string            `json:"reason"`
+	Safe           bool              `json:"safe"`
+	WouldRun       bool              `json:"would_run"`
+	PID            int               `json:"pid,omitempty"`
+	ProcessName    string            `json:"process_name,omitempty"`
+	ExecutablePath string            `json:"executable_path,omitempty"`
+	Error          string            `json:"error,omitempty"`
 }
 
 type CleanupPlan struct {
@@ -103,11 +106,14 @@ func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
 
 	for _, process := range report.Processes {
 		plan.Actions = append(plan.Actions, CleanupAction{
-			Type:     CleanupActionKillProcess,
-			Target:   processTarget(process),
-			Reason:   "Known Grabber process detected",
-			Safe:     true,
-			WouldRun: opts.DryRun,
+			Type:           CleanupActionKillProcess,
+			Target:         processTarget(process),
+			Reason:         "Known Grabber process detected",
+			Safe:           true,
+			WouldRun:       opts.DryRun,
+			PID:            process.PID,
+			ProcessName:    process.Name,
+			ExecutablePath: process.ExecutablePath,
 		})
 	}
 

@@ -30,11 +30,6 @@ type globalOptions struct {
 }
 
 func main() {
-	if err := ensureElevatedAtStart(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
 	opts := &globalOptions{}
 	rootCmd := &cobra.Command{
 		Use:           "kigrepair",
@@ -84,14 +79,16 @@ func repairCommand(opts *globalOptions) *cobra.Command {
 
 func cleanupCommand(opts *globalOptions) *cobra.Command {
 	var dryRun bool
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   "cleanup",
-		Short: "Preview Grabber cleanup actions",
+		Short: "Clean up Grabber services, processes, files, and registry leftovers",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, cleaner.CleanupWorkflow{DryRun: dryRun})
+			return runWorkflow(opts, cleaner.CleanupWorkflow{DryRun: dryRun, Yes: yes})
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview cleanup actions without modifying the system")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm real cleanup without prompting")
 	return cmd
 }
 
