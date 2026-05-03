@@ -95,15 +95,17 @@ func cleanupCommand(opts *globalOptions) *cobra.Command {
 func installCommand(opts *globalOptions) *cobra.Command {
 	var invite string
 	var installerPath string
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Run placeholder Grabber install workflow",
+		Short: "Install Grabber from an MSI package",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, installer.InstallWorkflow{Invite: invite, Installer: installerPath})
+			return runWorkflow(opts, installer.InstallWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
 		},
 	}
 	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
 	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm install without prompting")
 	return cmd
 }
 

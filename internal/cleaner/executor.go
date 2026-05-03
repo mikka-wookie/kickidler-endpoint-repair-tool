@@ -89,6 +89,8 @@ func (e Executor) ExecuteAction(action CleanupAction) app.OperationResult {
 }
 
 func (e Executor) stopService(action CleanupAction) app.OperationResult {
+	// MVP implementation: uses sc.exe. Keep this isolated so it can later be
+	// replaced with native Windows service APIs.
 	if !serviceExists(e.RunCommand, action.Target) {
 		return operation(action.Type, action.Target, app.OperationStatusSkipped, "Service does not exist", "")
 	}
@@ -114,6 +116,8 @@ func (e Executor) stopService(action CleanupAction) app.OperationResult {
 }
 
 func (e Executor) deleteService(action CleanupAction) app.OperationResult {
+	// MVP implementation: uses sc.exe. Keep this isolated so it can later be
+	// replaced with native Windows service APIs.
 	if !serviceExists(e.RunCommand, action.Target) {
 		return operation(action.Type, action.Target, app.OperationStatusSkipped, "Service does not exist", "")
 	}
@@ -128,6 +132,8 @@ func (e Executor) deleteService(action CleanupAction) app.OperationResult {
 }
 
 func (e Executor) killProcess(action CleanupAction) app.OperationResult {
+	// MVP implementation: uses taskkill.exe by PID. Keep this isolated so it can
+	// later be replaced with native Windows process APIs.
 	pid := action.PID
 	if pid == 0 {
 		pid = parsePID(action.Target)
@@ -258,11 +264,15 @@ func resultError(result CommandResult) string {
 }
 
 func serviceExists(run CommandRunner, name string) bool {
+	// MVP implementation: uses sc.exe query. Keep this isolated so it can later
+	// be replaced with native Windows service APIs.
 	result := run("sc.exe", "query", name)
 	return result.ExitCode == 0
 }
 
 func serviceState(run CommandRunner, name string) string {
+	// MVP implementation: uses sc.exe query. Keep this isolated so it can later
+	// be replaced with native Windows service APIs.
 	result := run("sc.exe", "query", name)
 	re := regexp.MustCompile(`(?m)^\s*STATE\s*:\s*\d+\s+([A-Z_]+)`)
 	if match := re.FindStringSubmatch(result.Output); len(match) == 2 {
@@ -272,6 +282,8 @@ func serviceState(run CommandRunner, name string) string {
 }
 
 func processExists(run CommandRunner, pid int) bool {
+	// MVP implementation: uses tasklist.exe for PID existence checks. Keep this
+	// isolated so it can later be replaced with native Windows process APIs.
 	result := run("tasklist.exe", "/FI", "PID eq "+strconv.Itoa(pid), "/NH")
 	if result.ExitCode != 0 {
 		return false
@@ -280,6 +292,8 @@ func processExists(run CommandRunner, pid int) bool {
 }
 
 func currentProcessExecutablePath(run CommandRunner, pid int) string {
+	// MVP implementation: uses PowerShell/CIM for process path verification. Keep
+	// this isolated so it can later be replaced with native Windows process APIs.
 	script := fmt.Sprintf(`$p=Get-CimInstance Win32_Process -Filter "ProcessId = %d"; if ($null -ne $p) { $p.ExecutablePath }`, pid)
 	result := run("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
 	if result.ExitCode != 0 {
