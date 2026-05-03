@@ -1,93 +1,53 @@
 # kigrepair
 
-`kigrepair` is a Windows CLI-first support utility for Kickidler support engineers. The current implemented workflows focus on Grabber detection, health classification, cleanup planning, real cleanup execution, Defender exclusion detection, and report generation.
+`kigrepair` is a Windows-focused Kickidler support utility for detecting, cleaning, installing, and later repairing Grabber installations.
 
-The project is designed as an extendable support toolkit. Repair/reinstall, Defender modification, MSI install, support bundles, service diagnostics, network tests, and GUI integration are planned future areas.
+The project is CLI-first and intended for support engineers who need auditable diagnostics and recovery actions on Windows endpoints. It is designed as an extendable support toolkit, not a one-time cleanup script.
 
-## Commands
+## Current Commands
 
-- `check` - detect Grabber installation state and write a report.
-- `cleanup --dry-run` - generate and report a cleanup plan without changing the system.
-- `cleanup` - execute real cleanup after confirmation.
-- `repair` - placeholder workflow; reinstall/repair is not implemented yet.
-- `install` - placeholder workflow; MSI install is not implemented yet.
-- `defender` - placeholder workflow; Defender settings are not modified yet.
-- `collect-report` - placeholder diagnostic collection workflow.
-- `version` - print the application version.
+Implemented commands:
+
+- `check` - detects the current Grabber installation state, classifies health, checks files/services/registry/Defender state, and writes reports.
+- `cleanup --dry-run` - builds and writes a cleanup plan without modifying the system.
+- `cleanup` - performs real cleanup of planned services, processes, files, registry leftovers, and MSI uninstall steps after confirmation and safety validation.
+- `install` - runs the MSI install command with the provided invite and installer path, then verifies final state.
+- `defender` - reports Defender exclusion status for the detected installation.
+- `defender --ensure` - adds missing Defender exclusions after confirmation.
+- `version` - prints the application version.
+
+Related placeholder/planned commands may exist in the CLI, but the full repair workflow is not implemented yet.
 
 Global flags:
 
-- `--output string`
-- `--quiet`
-- `--non-interactive`
-- `--force`
-- `--json`
+- `--output string` - report output directory or report root.
+- `--quiet` - suppress console output.
+- `--non-interactive` - disable prompts.
+- `--force` - reserved for privileged workflows.
+- `--json` - print command results as JSON.
 
-Cleanup flags:
+## Current Workflow Status
 
-- `--dry-run` - preview cleanup actions only.
-- `--yes` - confirm real cleanup without prompting.
+Implemented:
 
-Command-specific placeholder flags:
+- detection/check workflow
+- mode-aware install path detection
+- Defender exclusion detection
+- cleanup dry-run
+- real cleanup
+- MSI install command
+- Defender status/ensure command
 
-- `repair --invite string --installer string`
-- `install --invite string --installer string`
-- `defender --ensure`
+Not implemented yet:
 
-## Cleanup Safety
-
-Dry-run cleanup is non-destructive:
-
-```powershell
-.\kigrepair.exe cleanup --dry-run
-```
-
-Real cleanup is destructive and requires administrator rights:
-
-```powershell
-.\kigrepair.exe cleanup
-```
-
-In interactive mode, real cleanup prints the planned actions and requires the user to type exactly:
-
-```text
-YES
-```
-
-Automation mode must provide `--yes`:
-
-```powershell
-.\kigrepair.exe cleanup --yes --quiet --non-interactive
-```
-
-If `--quiet` or `--non-interactive` is used without `--yes`, cleanup exits with code `3` and does not run destructive actions.
-
-Real cleanup only executes actions produced by the cleanup planner and marked safe. It does not perform repair, reinstall, Defender exclusion changes, or MSI install.
-
-Execution order:
-
-1. `stop_service`
-2. `kill_process`
-3. `msi_uninstall`
-4. `delete_service`
-5. `delete_path`
-6. `delete_registry_key`
-
-## Exit Codes
-
-Cleanup uses stable exit codes:
-
-- `0` - cleanup completed successfully
-- `1` - cleanup completed with warnings
-- `2` - administrator rights required
-- `3` - confirmation declined or missing
-- `4` - cleanup blocked by safety validation
-- `5` - cleanup failed partially
-- `10` - unexpected error
+- full repair workflow
+- GUI
+- collect-report/support bundle improvements if not complete
+- native Windows service/process APIs
 
 ## Reports
 
-By default, reports are written under:
+All reports and logs are written under:
 
 ```text
 C:\ProgramData\kigrepair\Reports\<timestamp>\
@@ -99,31 +59,127 @@ Example:
 C:\ProgramData\kigrepair\Reports\2026-05-03_14-30-22\
 ```
 
-Cleanup reports may include:
+Common files:
 
 - `initial-detection.json`
-- `cleanup-plan.json`
+- `final-detection.json`
 - `operations.json`
 - `summary.txt`
 - `repair.log`
-- `final-detection.json`
+- `cleanup-plan.json`
+- `install-result.json`
+- `defender-result.json`
+- `msi-install.log`
 - `msi-uninstall.log`
-- `registry-backup\*.reg`
 
-## Windows Execution MVP
+Quiet and non-interactive modes still write logs and reports.
 
-The current MVP uses external Windows tools in low-level executor/detector packages:
+## Command Examples
 
-- `sc.exe` for service query, stop, and delete
-- `taskkill.exe` for process termination by PID
-- PowerShell/CIM for process detection and process path verification
-- PowerShell Defender cmdlets for Defender exclusion detection
-- `msiexec.exe` for MSI uninstall
-- `reg.exe` for registry export backup
+Check:
 
-These calls should remain isolated behind low-level packages such as `internal/cleaner`, `internal/detector`, or future `internal/winapi` wrappers. Cobra commands and workflow orchestration should call internal abstractions, not run external commands directly.
+```powershell
+.\kigrepair.exe check
+```
 
-Long-term, service and process operations should move to native Windows APIs where practical. `msiexec.exe` remains acceptable for MSI operations, and PowerShell remains acceptable for Defender cmdlets unless a better supported API is added.
+Cleanup dry-run:
+
+```powershell
+.\kigrepair.exe cleanup --dry-run
+```
+
+Real cleanup interactive:
+
+```powershell
+.\kigrepair.exe cleanup
+```
+
+Real cleanup automation:
+
+```powershell
+.\kigrepair.exe cleanup --yes --quiet --non-interactive
+```
+
+Install:
+
+```powershell
+.\kigrepair.exe install --invite <INVITE> --installer .\grabber.msi
+```
+
+Defender status:
+
+```powershell
+.\kigrepair.exe defender
+```
+
+Defender ensure:
+
+```powershell
+.\kigrepair.exe defender --ensure
+```
+
+Defender ensure automation:
+
+```powershell
+.\kigrepair.exe defender --ensure --yes --quiet --non-interactive
+```
+
+Version:
+
+```powershell
+.\kigrepair.exe version
+```
+
+## Safety Notes
+
+- `check` does not modify the system.
+- `cleanup --dry-run` does not modify the system.
+- Real cleanup requires administrator rights.
+- Install requires administrator rights.
+- `defender --ensure` requires administrator rights.
+- Quiet/non-interactive modes still write logs and reports.
+- Invite values must not be logged.
+- Real cleanup and Defender ensure are intended for authorized support or enterprise automation use only.
+
+## Cleanup Safety
+
+Real cleanup is destructive and requires confirmation unless automation flags are provided:
+
+```powershell
+.\kigrepair.exe cleanup --yes --quiet --non-interactive
+```
+
+Cleanup actions are produced by the cleanup planner and safety validation. Detection-only commands must not perform cleanup, repair, reinstall, Defender changes, or MSI actions.
+
+Current cleanup action order:
+
+1. `stop_service`
+2. `kill_process`
+3. `msi_uninstall`
+4. `delete_service`
+5. `delete_path`
+6. `delete_registry_key`
+
+## MVP Implementation Notes
+
+- Service operations currently may use `sc.exe`.
+- Process termination currently may use `taskkill.exe`.
+- Process and Defender detection may use PowerShell.
+- MSI operations use `msiexec.exe`.
+- This is acceptable for the MVP.
+- Long-term target is to isolate or replace service/process operations with native Windows APIs where practical.
+
+External command usage should remain isolated in low-level packages or Windows-specific wrappers. Cobra command entrypoints and workflow orchestration should call internal abstractions rather than running system commands directly.
+
+## Next Planned Step
+
+Full repair workflow:
+
+```text
+detect -> cleanup -> defender ensure -> install -> final verification -> report
+```
+
+Do not implement this step yet.
 
 ## Development Setup
 
@@ -132,12 +188,6 @@ Requirements:
 - Windows
 - Go 1.22 or newer
 - VS Code with the Go extension
-
-Install dependencies:
-
-```powershell
-go mod tidy
-```
 
 Build:
 
@@ -149,20 +199,8 @@ Validate:
 
 ```powershell
 gofmt -w .
-go mod tidy
 go test ./...
 go build -o kigrepair.exe ./cmd/kigrepair
-```
-
-Run examples:
-
-```powershell
-.\kigrepair.exe check
-.\kigrepair.exe cleanup --dry-run
-.\kigrepair.exe cleanup
-.\kigrepair.exe cleanup --yes --quiet --non-interactive
-.\kigrepair.exe collect-report --json
-.\kigrepair.exe version
 ```
 
 To write reports to a local directory during development:
@@ -173,6 +211,6 @@ To write reports to a local directory during development:
 
 ## Architecture
 
-The project is split into internal packages for app context, workflows, configuration, detection, repair, cleanup, installation, Defender integration, diagnostics, reports, safety validation, Windows-specific wrappers, logging, and future UI surfaces.
+The project is split into internal packages for app context, workflows, configuration, detection, cleanup, installation, Defender integration, diagnostics, reports, safety validation, Windows-specific wrappers, logging, and future UI surfaces.
 
-Destructive cleanup actions must go through cleanup planning, safety validation, operation result recording, logging, and before/after reporting.
+Keep workflow orchestration separate from low-level Windows operations. Destructive actions should go through planning, safety validation, operation result recording, logging, before/after detection, and report writing.
