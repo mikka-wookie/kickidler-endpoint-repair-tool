@@ -1,0 +1,19 @@
+services:
+  - ngs
+  - tls
+  - WmiProviderSE
+
+cleanup_paths:
+  - "%ProgramFiles%\\TeleLinkSoft"
+  - "%ProgramFiles%\\TeleLinkSoftHelper"
+  - "%ProgramFiles(x86)%\\TeleLinkSoft"
+  - "%ProgramFiles(x86)%\\TeleLinkSoftHelper"
+  - "%ProgramData%\\E891C8F2-6D3B-5E17-7F3C-9A1D4E2B8C60"
+  - "%SystemRoot%\\System32\\wmi"
+
+defender_exclusion_paths:
+  - "%ProgramFiles%\\TeleLinkSoft"
+  - "%ProgramFiles%\\TeleLinkSoftHelper"
+  - "%ProgramFiles(x86)%\\TeleLinkSoft"
+  - "%ProgramFiles(x86)%\\TeleLinkSoftHelper"
+  - "%SystemRoot%\\System32\\wmi"
