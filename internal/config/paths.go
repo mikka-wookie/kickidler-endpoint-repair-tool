@@ -11,7 +11,7 @@ func ExpandPath(path string) string {
 	expanded := os.ExpandEnv(path)
 	return percentEnvPattern.ReplaceAllStringFunc(expanded, func(match string) string {
 		key := strings.Trim(match, "%")
-		if value, ok := os.LookupEnv(key); ok {
+		if value, ok := os.LookupEnv(key); ok && value != "" {
 			return value
 		}
 		return match

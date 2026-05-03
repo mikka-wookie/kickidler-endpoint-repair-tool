@@ -10,6 +10,7 @@ dist/
 Reports/
 *.log
 .docs/
+AGENTS.md
 
 # VS Code
 .vscode/*

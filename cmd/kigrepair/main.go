@@ -51,7 +51,7 @@ func main() {
 
 	rootCmd.AddCommand(workflowCommand("check", "Detect Kickidler Grabber installation state", opts, checks.CheckWorkflow{}))
 	rootCmd.AddCommand(repairCommand(opts))
-	rootCmd.AddCommand(workflowCommand("cleanup", "Plan placeholder cleanup", opts, cleaner.CleanupWorkflow{}))
+	rootCmd.AddCommand(cleanupCommand(opts))
 	rootCmd.AddCommand(installCommand(opts))
 	rootCmd.AddCommand(defenderCommand(opts))
 	rootCmd.AddCommand(workflowCommand("collect-report", "Collect placeholder diagnostics report", opts, diagnostics.CollectReportWorkflow{}))
@@ -79,6 +79,19 @@ func repairCommand(opts *globalOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
 	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
+	return cmd
+}
+
+func cleanupCommand(opts *globalOptions) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "cleanup",
+		Short: "Preview Grabber cleanup actions",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflow(opts, cleaner.CleanupWorkflow{DryRun: dryRun})
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview cleanup actions without modifying the system")
 	return cmd
 }
 

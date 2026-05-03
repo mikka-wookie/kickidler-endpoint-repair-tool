@@ -78,9 +78,7 @@ func queryProcesses() ([]cimProcess, error) {
 }
 
 func knownProcessNames() []string {
-	names := append([]string{}, standardExecutableCandidates...)
-	names = append(names, hiddenWMIExecutableCandidates...)
-	return names
+	return append([]string{}, standardExecutableCandidates...)
 }
 
 func requiredWMIFilePaths(system SystemState) []string {
