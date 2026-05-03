@@ -32,6 +32,8 @@ type AppContext struct {
 	Logger         Logger
 	Reporter       Reporter
 	Results        []OperationResult
+	JSONValue      any
+	ExitCode       int
 }
 
 func NewContext() *AppContext {

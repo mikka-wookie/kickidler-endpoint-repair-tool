@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -31,8 +32,10 @@ type globalOptions struct {
 func main() {
 	opts := &globalOptions{}
 	rootCmd := &cobra.Command{
-		Use:   "kigrepair",
-		Short: "Kickidler support and repair utility",
+		Use:           "kigrepair",
+		Short:         "Kickidler support and repair utility",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
 	rootCmd.PersistentFlags().StringVar(&opts.output, "output", "", "report output directory or report root")
@@ -41,7 +44,7 @@ func main() {
 	rootCmd.PersistentFlags().BoolVar(&opts.force, "force", false, "allow future privileged workflows to bypass confirmations")
 	rootCmd.PersistentFlags().BoolVar(&opts.jsonOutput, "json", false, "print command results as JSON")
 
-	rootCmd.AddCommand(workflowCommand("check", "Run placeholder checks", opts, checks.CheckWorkflow{}))
+	rootCmd.AddCommand(workflowCommand("check", "Detect Kickidler Grabber installation state", opts, checks.CheckWorkflow{}))
 	rootCmd.AddCommand(repairCommand(opts))
 	rootCmd.AddCommand(workflowCommand("cleanup", "Plan placeholder cleanup", opts, cleaner.CleanupWorkflow{}))
 	rootCmd.AddCommand(installCommand(opts))
@@ -50,6 +53,10 @@ func main() {
 	rootCmd.AddCommand(versionCommand())
 
 	if err := rootCmd.Execute(); err != nil {
+		var exitErr app.ExitError
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.Code)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -141,7 +148,7 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	}
 	ctx.Reporter = reporter
 
-	logger, err := logging.New(reports.LogPath(ctx.OutputDir), ctx.Quiet)
+	logger, err := logging.New(reports.LogPath(ctx.OutputDir), ctx.Quiet || ctx.JSONOutput)
 	if err != nil {
 		return err
 	}
@@ -153,13 +160,20 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	}
 
 	if ctx.JSONOutput {
-		encoded, err := json.MarshalIndent(ctx.Results, "", "  ")
+		value := any(ctx.Results)
+		if ctx.JSONValue != nil {
+			value = ctx.JSONValue
+		}
+		encoded, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
 			return err
 		}
 		fmt.Println(string(encoded))
 	} else if !ctx.Quiet {
 		fmt.Printf("Report directory: %s\n", ctx.OutputDir)
+	}
+	if ctx.ExitCode != 0 {
+		return app.ExitError{Code: ctx.ExitCode}
 	}
 	return nil
 }

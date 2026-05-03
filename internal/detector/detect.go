@@ -1,21 +1,102 @@
 package detector
 
-import "time"
+import (
+	"fmt"
+	"os"
+	"os/user"
+	"runtime"
+	"time"
+
+	"golang.org/x/sys/windows"
+)
 
 type DetectionReport struct {
-	Health    GrabberHealthStatus `json:"health"`
-	Services  []ServiceState      `json:"services"`
-	Processes []ProcessState      `json:"processes"`
-	Files     []FileState         `json:"files"`
-	Registry  []RegistryState     `json:"registry"`
-	Defender  DefenderState       `json:"defender"`
-	CreatedAt time.Time           `json:"created_at"`
+	GeneratedAt     time.Time           `json:"generated_at"`
+	IsAdmin         bool                `json:"is_admin"`
+	System          SystemState         `json:"system"`
+	Services        []ServiceState      `json:"services"`
+	Files           []FileState         `json:"files"`
+	Processes       []ProcessState      `json:"processes"`
+	Registry        []RegistryState     `json:"registry"`
+	Defender        DefenderState       `json:"defender"`
+	Health          GrabberHealthStatus `json:"health"`
+	Issues          []string            `json:"issues"`
+	Recommendations []string            `json:"recommendations"`
+}
+
+type SystemState struct {
+	GOOS            string `json:"goos"`
+	GOARCH          string `json:"goarch"`
+	Windows         string `json:"windows_version,omitempty"`
+	Hostname        string `json:"hostname,omitempty"`
+	Username        string `json:"username,omitempty"`
+	SystemRoot      string `json:"system_root,omitempty"`
+	ProgramFiles    string `json:"program_files,omitempty"`
+	ProgramFilesX86 string `json:"program_files_x86,omitempty"`
+	ProgramData     string `json:"program_data,omitempty"`
 }
 
 func Detect() DetectionReport {
-	return DetectionReport{
-		Health:    GrabberHealthUnknown,
-		Defender:  DefenderState{Available: false, Message: "placeholder"},
-		CreatedAt: time.Now(),
+	system := detectSystemState()
+	report := DetectionReport{
+		GeneratedAt: time.Now(),
+		IsAdmin:     isAdmin(),
+		System:      system,
 	}
+	report.Services = DetectServices(system)
+	report.Files = DetectFiles(system)
+	report.Processes = DetectProcesses(system)
+	report.Registry = DetectRegistry()
+	report.Defender = DetectDefender(system)
+	report.Health, report.Issues, report.Recommendations = CalculateHealth(report)
+	return report
+}
+
+func detectSystemState() SystemState {
+	hostname, _ := os.Hostname()
+	username := os.Getenv("USERNAME")
+	if current, err := user.Current(); err == nil && current.Username != "" {
+		username = current.Username
+	}
+	return SystemState{
+		GOOS:            runtime.GOOS,
+		GOARCH:          runtime.GOARCH,
+		Windows:         windowsVersion(),
+		Hostname:        hostname,
+		Username:        username,
+		SystemRoot:      os.Getenv("SystemRoot"),
+		ProgramFiles:    os.Getenv("ProgramFiles"),
+		ProgramFilesX86: os.Getenv("ProgramFiles(x86)"),
+		ProgramData:     os.Getenv("ProgramData"),
+	}
+}
+
+func windowsVersion() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	version := windows.RtlGetVersion()
+	if version == nil {
+		return os.Getenv("OS")
+	}
+	return fmt.Sprintf("%d.%d.%d", version.MajorVersion, version.MinorVersion, version.BuildNumber)
+}
+
+func isAdmin() bool {
+	var sid *windows.SID
+	if err := windows.AllocateAndInitializeSid(
+		&windows.SECURITY_NT_AUTHORITY,
+		2,
+		windows.SECURITY_BUILTIN_DOMAIN_RID,
+		windows.DOMAIN_ALIAS_RID_ADMINS,
+		0, 0, 0, 0, 0, 0,
+		&sid,
+	); err != nil {
+		return false
+	}
+	defer windows.FreeSid(sid)
+
+	token := windows.Token(0)
+	member, err := token.IsMember(sid)
+	return err == nil && member
 }
