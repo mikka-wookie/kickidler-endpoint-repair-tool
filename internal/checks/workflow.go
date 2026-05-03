@@ -20,6 +20,7 @@ func (w CheckWorkflow) Run(ctx *app.AppContext) error {
 	ctx.Logger.Info("Starting detection-only check")
 	report := detector.Detect()
 	ctx.JSONValue = report
+	logDefenderDetection(ctx.Logger, report)
 
 	status := app.OperationStatusSuccess
 	if report.Health != detector.GrabberHealthHealthy {
@@ -82,6 +83,9 @@ func FormatSummary(report detector.DetectionReport, reportDir string) string {
 	b.WriteString("Service status: " + serviceStatus(report) + "\n")
 	b.WriteString("Service executable: " + valueOrDash(report.ServiceExecutablePath) + "\n")
 	b.WriteString("Defender exclusion: " + defenderExclusionStatus(report) + "\n\n")
+	if coveredBy := defenderCoveredBy(report); coveredBy != "" {
+		b.WriteString("Covered by: " + coveredBy + "\n\n")
+	}
 	if len(report.Issues) > 0 {
 		b.WriteString("Issues:\n")
 		for _, issue := range report.Issues {
@@ -137,4 +141,30 @@ func defenderExclusionStatus(report detector.DetectionReport) string {
 		return "present"
 	}
 	return "-"
+}
+
+func defenderCoveredBy(report detector.DetectionReport) string {
+	if !report.Defender.Available {
+		return ""
+	}
+	for _, requiredPath := range report.RequiredDefenderPaths {
+		requiredNormalized := detector.NormalizeWindowsPath(requiredPath)
+		for _, exclusionPath := range report.Defender.ExclusionPaths {
+			if detector.IsPathCoveredByExclusion(requiredPath, exclusionPath) && !strings.EqualFold(requiredNormalized, detector.NormalizeWindowsPath(exclusionPath)) {
+				return exclusionPath
+			}
+		}
+	}
+	return ""
+}
+
+func logDefenderDetection(logger app.Logger, report detector.DetectionReport) {
+	logger.Info("Defender raw exclusion paths: %v", report.Defender.ExclusionPaths)
+	logger.Info("Defender normalized exclusion paths: %v", report.Defender.NormalizedExclusionPaths)
+	logger.Info("Defender required paths: %v", report.Defender.RequiredPaths)
+	logger.Info("Defender covered paths: %v", report.Defender.CoveredPaths)
+	logger.Info("Defender missing paths: %v", report.Defender.MissingPaths)
+	if report.Defender.Error != "" {
+		logger.Warn("Defender detection error: %s", report.Defender.Error)
+	}
 }

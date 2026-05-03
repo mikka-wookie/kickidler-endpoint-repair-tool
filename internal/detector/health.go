@@ -50,8 +50,7 @@ func CalculateHealth(report DetectionReport) (GrabberHealthStatus, []string, []s
 		}
 	}
 	if !report.Defender.Available {
-		issues = append(issues, "Defender exclusion could not be verified")
-		recommendations = appendRecommendation(recommendations, "Verify Defender exclusions manually")
+		issues = append(issues, "Defender exclusions could not be verified")
 	}
 
 	if anyServiceExists && report.PrimaryService == "" {

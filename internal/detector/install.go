@@ -70,10 +70,13 @@ func EnrichDetectionReport(report DetectionReport) DetectionReport {
 		report.ServiceExecutableExists = fileExists(report.Files, report.ServiceExecutablePath)
 	}
 	report.RequiredDefenderPaths = requiredDefenderPathsForInstall(report.System, report.InstallMode, report.InstallRoot)
-	report.MissingDefenderPaths = MissingPaths(report.RequiredDefenderPaths, report.Defender.ExclusionPaths)
+	normalizedExclusions, coveredDefenderPaths, missingDefenderPaths := EvaluateDefenderCoverage(report.RequiredDefenderPaths, report.Defender.ExclusionPaths)
+	report.MissingDefenderPaths = missingDefenderPaths
 	if report.Defender.Available {
 		report.Defender.RequiredPaths = append([]string{}, report.RequiredDefenderPaths...)
-		report.Defender.MissingPaths = append([]string{}, report.MissingDefenderPaths...)
+		report.Defender.NormalizedExclusionPaths = normalizedExclusions
+		report.Defender.CoveredPaths = coveredDefenderPaths
+		report.Defender.MissingPaths = append([]string{}, missingDefenderPaths...)
 	}
 	return report
 }

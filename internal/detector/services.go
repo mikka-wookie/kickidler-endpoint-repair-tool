@@ -95,12 +95,48 @@ func pathsEqual(a, b string) bool {
 }
 
 func normalizePath(path string) string {
+	return strings.ToLower(NormalizeWindowsPath(path))
+}
+
+func NormalizeWindowsPath(path string) string {
 	path = strings.TrimSpace(path)
-	path = strings.Trim(path, `"`)
+	path = strings.Trim(path, `"'`)
+	path = strings.TrimSpace(path)
 	path = expandWindowsEnv(path)
 	path = strings.TrimPrefix(path, `\??\`)
+	path = normalizeLongPathPrefix(path)
 	path = strings.ReplaceAll(path, "/", `\`)
-	return strings.ToLower(filepath.Clean(path))
+	path = collapseWindowsBackslashes(path)
+	path = filepath.Clean(path)
+	path = strings.TrimSuffix(path, `\`)
+	if len(path) == 2 && path[1] == ':' {
+		path += `\`
+	}
+	return path
+}
+
+func normalizeLongPathPrefix(path string) string {
+	if strings.HasPrefix(path, `\\?\UNC\`) {
+		return `\\` + strings.TrimPrefix(path, `\\?\UNC\`)
+	}
+	if strings.HasPrefix(path, `\\?\`) {
+		return strings.TrimPrefix(path, `\\?\`)
+	}
+	return path
+}
+
+func collapseWindowsBackslashes(path string) string {
+	if strings.HasPrefix(path, `\\`) {
+		return `\\` + collapseRepeatedBackslashes(path[2:])
+	}
+	return collapseRepeatedBackslashes(path)
+}
+
+func collapseRepeatedBackslashes(path string) string {
+	for strings.Contains(path, `\\`) {
+		path = strings.ReplaceAll(path, `\\`, `\`)
+	}
+	return path
 }
 
 func expandWindowsEnv(value string) string {

@@ -30,6 +30,11 @@ type globalOptions struct {
 }
 
 func main() {
+	if err := ensureElevatedAtStart(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	opts := &globalOptions{}
 	rootCmd := &cobra.Command{
 		Use:           "kigrepair",
