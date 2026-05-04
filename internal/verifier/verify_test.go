@@ -13,36 +13,118 @@ import (
 	"kigrepair/internal/reports"
 )
 
-func TestVerifyHealthyReportSucceeds(t *testing.T) {
-	got := Verify(healthyReport(), Options{})
-	if got.Status != VerificationSuccess {
-		t.Fatalf("status = %s, want %s: %#v", got.Status, VerificationSuccess, got)
+func TestVerifyInstallation(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*detector.DetectionReport, string)
+		opts VerifyOptions
+		want VerificationStatus
+	}{
+		{
+			name: "healthy standard install",
+			opts: VerifyOptions{RequireRunningProcess: true, AllowDefenderUnavailable: true},
+			want: VerificationPassed,
+		},
+		{
+			name: "healthy with missing defender",
+			edit: func(report *detector.DetectionReport, root string) {
+				report.MissingDefenderPaths = []string{root}
+				report.Defender.MissingPaths = []string{root}
+				report.Defender.ExclusionPaths = nil
+			},
+			opts: VerifyOptions{RequireRunningProcess: true, AllowDefenderUnavailable: true},
+			want: VerificationWarning,
+		},
+		{
+			name: "defender unavailable",
+			edit: func(report *detector.DetectionReport, root string) {
+				report.Defender.Available = false
+				report.Defender.Error = "unavailable"
+			},
+			opts: VerifyOptions{RequireRunningProcess: true, AllowDefenderUnavailable: true},
+			want: VerificationWarning,
+		},
+		{
+			name: "service stopped but executable exists",
+			edit: func(report *detector.DetectionReport, root string) {
+				report.Services[0].Status = "stopped"
+			},
+			opts: VerifyOptions{RequireRunningProcess: true, AllowStoppedServiceWarning: true, AllowDefenderUnavailable: true},
+			want: VerificationWarning,
+		},
+		{
+			name: "executable missing",
+			edit: func(report *detector.DetectionReport, root string) {
+				report.ServiceExecutableExists = false
+				report.ServiceExecutablePath = filepath.Join(root, "missing.exe")
+			},
+			opts: VerifyOptions{RequireRunningProcess: true, AllowDefenderUnavailable: true},
+			want: VerificationFailed,
+		},
+		{
+			name: "not installed after install",
+			edit: func(report *detector.DetectionReport, root string) {
+				*report = detector.DetectionReport{
+					Health:      detector.GrabberHealthNotInstalled,
+					InstallMode: detector.InstallModeNotInstalled,
+					Defender:    detector.DefenderState{Available: true},
+				}
+			},
+			opts: VerifyOptions{RequireRunningProcess: true, AllowDefenderUnavailable: true},
+			want: VerificationFailed,
+		},
+		{
+			name: "process missing but service running",
+			edit: func(report *detector.DetectionReport, root string) {
+				report.Processes = nil
+			},
+			opts: VerifyOptions{RequireRunningProcess: true, AllowDefenderUnavailable: true},
+			want: VerificationWarning,
+		},
+		{
+			name: "msi log missing when install executed",
+			opts: VerifyOptions{InstallExecuted: true, MSIInstallLogPath: filepath.Join(t.TempDir(), "missing.log"), RequireRunningProcess: true, AllowDefenderUnavailable: true},
+			want: VerificationWarning,
+		},
+		{
+			name: "hidden wmi healthy",
+			edit: func(report *detector.DetectionReport, root string) {
+				systemRoot := filepath.Join(t.TempDir(), "Windows")
+				wmiRoot := filepath.Join(systemRoot, "System32", "wmi")
+				bin := filepath.Join(wmiRoot, "bin")
+				exe := tempFile(t, bin, "svchost.exe")
+				*report = healthyReport(wmiRoot, exe)
+				report.System.SystemRoot = systemRoot
+				report.InstallMode = detector.InstallModeHiddenWMI
+				report.InstallRoot = wmiRoot
+				report.BinaryDir = bin
+				report.PrimaryService = "WmiProviderSE"
+				report.PrimaryServiceImagePath = exe
+				report.ServiceExecutablePath = exe
+				report.RequiredDefenderPaths = []string{wmiRoot}
+				report.Defender.RequiredPaths = []string{wmiRoot}
+				report.Defender.ExclusionPaths = []string{wmiRoot}
+				report.Services = []detector.ServiceState{{Name: "WmiProviderSE", Exists: true, Status: "running", ImagePath: exe}}
+				report.Processes = []detector.ProcessState{{Name: "svchost.exe", ExecutablePath: exe, MatchedByExactPath: true}}
+			},
+			opts: VerifyOptions{RequireRunningProcess: true, AllowDefenderUnavailable: true},
+			want: VerificationPassed,
+		},
 	}
-}
 
-func TestVerifyMissingDefenderWarns(t *testing.T) {
-	report := healthyReport()
-	report.MissingDefenderPaths = []string{`C:\Program Files\TeleLinkSoft\bin`}
-	got := Verify(report, Options{})
-	if got.Status != VerificationWarning {
-		t.Fatalf("status = %s, want %s: %#v", got.Status, VerificationWarning, got)
-	}
-}
-
-func TestVerifyBrokenHealthFails(t *testing.T) {
-	report := healthyReport()
-	report.Health = detector.GrabberHealthBroken
-	report.ServiceExecutableExists = false
-	got := Verify(report, Options{})
-	if got.Status != VerificationFailed {
-		t.Fatalf("status = %s, want %s: %#v", got.Status, VerificationFailed, got)
-	}
-}
-
-func TestVerifyInstallLogRequiredOnlyWhenInstallExecuted(t *testing.T) {
-	got := Verify(healthyReport(), Options{InstallExecuted: true, MSIInstallLog: `C:\missing\msi-install.log`})
-	if got.Status != VerificationFailed {
-		t.Fatalf("status = %s, want %s: %#v", got.Status, VerificationFailed, got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			exe := tempFile(t, root, "grabber2.exe")
+			report := healthyReport(root, exe)
+			if tt.edit != nil {
+				tt.edit(&report, root)
+			}
+			got := VerifyInstallation(report, tt.opts)
+			if got.OverallStatus != tt.want {
+				t.Fatalf("OverallStatus = %s, want %s: %#v", got.OverallStatus, tt.want, got)
+			}
+		})
 	}
 }
 
@@ -51,7 +133,7 @@ func TestExitCodeMapping(t *testing.T) {
 		status VerificationStatus
 		want   int
 	}{
-		{VerificationSuccess, app.ExitSuccess},
+		{VerificationPassed, app.ExitSuccess},
 		{VerificationWarning, app.ExitWarnings},
 		{VerificationFailed, app.ExitVerificationFailed},
 	}
@@ -63,9 +145,10 @@ func TestExitCodeMapping(t *testing.T) {
 }
 
 func TestFormatSummaryIncludesSupportAction(t *testing.T) {
-	result := Verify(healthyReport(), Options{})
+	result := VerifyInstallation(healthyReport(`C:\Program Files\TeleLinkSoft\bin`, `C:\Program Files\TeleLinkSoft\bin\grabber2.exe`), VerifyOptions{RequireRunningProcess: true, AllowDefenderUnavailable: true})
 	result.Command = "verify"
 	result.ReportDir = `C:\ProgramData\kigrepair\Reports\test`
+	result.ExitCode = ExitCode(result.OverallStatus)
 	summary := FormatSummary(result)
 	for _, want := range []string{
 		"Kigrepair Verify",
@@ -94,7 +177,7 @@ func TestVerifyWorkflowWritesExpectedReportsAndOperations(t *testing.T) {
 	err = VerifyWorkflow{
 		Detect: func() detector.DetectionReport {
 			detectCalls++
-			return healthyReport()
+			return healthyReport(`C:\Program Files\TeleLinkSoft\bin`, `C:\Program Files\TeleLinkSoft\bin\grabber2.exe`)
 		},
 	}.Run(ctx)
 	if err != nil {
@@ -120,13 +203,10 @@ func TestVerifyWorkflowWritesExpectedReportsAndOperations(t *testing.T) {
 }
 
 func TestVerificationResultJSONShapeHasTopLevelFields(t *testing.T) {
-	result := Verify(healthyReport(), Options{})
+	result := VerifyInstallation(healthyReport(`C:\Program Files\TeleLinkSoft\bin`, `C:\Program Files\TeleLinkSoft\bin\grabber2.exe`), VerifyOptions{RequireRunningProcess: true, AllowDefenderUnavailable: true})
 	result.Command = "verify"
-	result.ExitCode = ExitCode(result.Status)
+	result.ExitCode = ExitCode(result.OverallStatus)
 	result.ReportDir = `C:\ProgramData\kigrepair\Reports\test`
-	result.Health = string(result.Detection.Health)
-	result.InstallMode = string(result.Detection.InstallMode)
-	result.InstallRoot = result.Detection.InstallRoot
 	data, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
@@ -135,28 +215,42 @@ func TestVerificationResultJSONShapeHasTopLevelFields(t *testing.T) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"command", "status", "exit_code", "report_dir", "health", "install_mode", "install_root", "detection"} {
+	for _, key := range []string{"command", "overall_status", "exit_code", "report_dir", "health", "install_mode", "install_root", "detection"} {
 		if _, ok := decoded[key]; !ok {
 			t.Fatalf("JSON result missing key %q: %s", key, string(data))
 		}
 	}
 }
 
-func healthyReport() detector.DetectionReport {
+func healthyReport(root string, exe string) detector.DetectionReport {
 	return detector.DetectionReport{
 		Health:                  detector.GrabberHealthHealthy,
 		InstallMode:             detector.InstallModeStandard,
-		InstallRoot:             `C:\Program Files\TeleLinkSoft\bin`,
+		InstallRoot:             root,
 		PrimaryService:          "ngs",
-		ServiceExecutablePath:   `C:\Program Files\TeleLinkSoft\bin\grabber2.exe`,
+		PrimaryServiceImagePath: exe,
+		ServiceExecutablePath:   exe,
 		ServiceExecutableExists: true,
-		RequiredDefenderPaths:   []string{`C:\Program Files\TeleLinkSoft\bin`},
-		Services: []detector.ServiceState{
-			{Name: "ngs", Exists: true, Status: "running"},
+		RequiredDefenderPaths:   []string{root},
+		Services:                []detector.ServiceState{{Name: "ngs", Exists: true, Status: "running", ImagePath: exe}},
+		Processes:               []detector.ProcessState{{Name: "grabber2.exe", ExecutablePath: exe, MatchedByName: true}},
+		Defender: detector.DefenderState{
+			Available:      true,
+			RequiredPaths:  []string{root},
+			ExclusionPaths: []string{root},
+			CoveredPaths:   []string{root},
 		},
-		Processes: []detector.ProcessState{
-			{Name: "grabber2.exe", PID: 100, ExecutablePath: `C:\Program Files\TeleLinkSoft\bin\grabber2.exe`, MatchedByName: true},
-		},
-		Defender: detector.DefenderState{Available: true},
 	}
+}
+
+func tempFile(t *testing.T, dir string, name string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("exe"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

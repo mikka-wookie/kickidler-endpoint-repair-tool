@@ -1,192 +1,206 @@
 package verifier
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"kigrepair/internal/detector"
 )
 
-func Verify(report detector.DetectionReport, opts Options) VerificationResult {
+func VerifyInstallation(report detector.DetectionReport, opts VerifyOptions) VerificationResult {
+	started := time.Now()
+	if !opts.ExpectInstalledState {
+		opts.ExpectInstalledState = true
+	}
 	result := VerificationResult{
-		Status:          VerificationSuccess,
-		Message:         "Verification succeeded",
-		Detection:       report,
-		InstallExecuted: opts.InstallExecuted,
-		MSIInstallLog:   opts.MSIInstallLog,
+		StartedAt:         started,
+		Health:            string(report.Health),
+		InstallMode:       string(report.InstallMode),
+		InstallRoot:       report.InstallRoot,
+		PrimaryService:    report.PrimaryService,
+		ServiceStatus:     serviceStatus(report),
+		ServiceExecutable: report.ServiceExecutablePath,
+		Detection:         report,
 	}
 
-	result.add("final_health", string(report.Health), statusForHealth(report.Health), "Final health is "+string(report.Health))
-	result.add("install_root_detected", report.InstallRoot, requiredStringStatus(report.InstallRoot), requiredStringMessage("Install root", report.InstallRoot))
-	result.add("install_mode_detected", string(report.InstallMode), installModeStatus(report.InstallMode), "Install mode is "+string(report.InstallMode))
+	addFinalHealthCheck(&result, report)
+	addInstallRootCheck(&result, report, opts)
+	addInstallModeCheck(&result, report, opts)
+	addPrimaryServiceCheck(&result, report)
+	addServiceRunningCheck(&result, report, opts)
+	addImagePathCheck(&result, report)
+	addExecutableCheck(&result, report)
+	if opts.RequireRunningProcess {
+		addProcessCheck(&result, report)
+	}
+	addDefenderCheck(&result, report, opts)
+	if opts.InstallExecuted {
+		addMSILogCheck(&result, opts.MSIInstallLogPath)
+	}
 
-	serviceExists, serviceRunning := primaryServiceState(report)
-	result.add("primary_service_exists", report.PrimaryService, boolStatus(serviceExists), boolMessage("Primary service exists", serviceExists))
-	result.add("primary_service_running", report.PrimaryService, boolStatus(serviceRunning), boolMessage("Primary service is running", serviceRunning))
-
-	executableTarget := report.ServiceExecutablePath
-	result.add("service_executable_exists", executableTarget, boolStatus(strings.TrimSpace(executableTarget) != "" && report.ServiceExecutableExists), boolMessage("Service executable exists", strings.TrimSpace(executableTarget) != "" && report.ServiceExecutableExists))
-
-	processStatus, processTarget, processMessage := processCheck(report)
-	result.add("expected_grabber_process_running", processTarget, processStatus, processMessage)
-
-	defenderStatus, defenderTarget, defenderMessage := defenderCheck(report)
-	result.add("defender_exclusion_coverage", defenderTarget, defenderStatus, defenderMessage)
-
-	msiStatus, msiTarget, msiMessage := msiLogCheck(opts)
-	result.add("msi_install_log_exists", msiTarget, msiStatus, msiMessage)
-
-	result.classify()
+	result.OverallStatus = overallStatus(result.Checks)
+	result.FinishedAt = time.Now()
 	return result
 }
 
-func (r *VerificationResult) add(name string, target string, status CheckStatus, message string) {
-	r.Checks = append(r.Checks, VerificationCheck{
-		Name:      name,
-		Target:    target,
-		Status:    status,
-		Message:   message,
-		Timestamp: time.Now(),
-	})
+func addFinalHealthCheck(result *VerificationResult, report detector.DetectionReport) {
+	check := VerificationCheck{Name: "final_health", Target: "grabber", Status: VerificationPassed, Message: "Final health is healthy"}
+	if report.Health != detector.GrabberHealthHealthy {
+		check.Status = VerificationFailed
+		check.Message = "Final health is " + string(report.Health)
+		check.Error = check.Message
+	}
+	addCheck(result, check)
 }
 
-func (r *VerificationResult) classify() {
-	for _, check := range r.Checks {
-		switch check.Status {
-		case CheckFailed:
-			r.Errors = append(r.Errors, check.Message)
-		case CheckWarning:
-			r.Warnings = append(r.Warnings, check.Message)
-		}
+func addInstallRootCheck(result *VerificationResult, report detector.DetectionReport, opts VerifyOptions) {
+	check := VerificationCheck{Name: "install_root_detected", Target: report.InstallRoot, Status: VerificationPassed, Message: "Install root detected"}
+	if strings.TrimSpace(report.InstallRoot) == "" && opts.ExpectInstalledState {
+		check.Status = VerificationFailed
+		check.Message = "Install root was not detected"
+		check.Error = check.Message
 	}
-	if len(r.Errors) > 0 {
-		r.Status = VerificationFailed
-		r.Message = "Verification failed"
+	addCheck(result, check)
+}
+
+func addInstallModeCheck(result *VerificationResult, report detector.DetectionReport, opts VerifyOptions) {
+	check := VerificationCheck{Name: "install_mode_detected", Target: string(report.InstallMode), Status: VerificationPassed, Message: "Install mode detected"}
+	if report.InstallMode == detector.InstallModeNotInstalled && opts.ExpectInstalledState {
+		check.Status = VerificationFailed
+		check.Message = "Install mode is not_installed"
+		check.Error = check.Message
+	} else if !installModeDetected(report.InstallMode) {
+		check.Status = VerificationWarning
+		check.Message = "Install mode is " + string(report.InstallMode)
+	}
+	addCheck(result, check)
+}
+
+func addPrimaryServiceCheck(result *VerificationResult, report detector.DetectionReport) {
+	service := primaryService(report)
+	check := VerificationCheck{Name: "primary_service_exists", Target: report.PrimaryService, Status: VerificationPassed, Message: "Primary service exists"}
+	if service == nil {
+		check.Status = VerificationFailed
+		check.Message = "Primary service was not found"
+		check.Error = check.Message
+	}
+	addCheck(result, check)
+}
+
+func addServiceRunningCheck(result *VerificationResult, report detector.DetectionReport, opts VerifyOptions) {
+	check := VerificationCheck{Name: "primary_service_running", Target: report.PrimaryService, Status: VerificationPassed, Message: "Primary service is running"}
+	if serviceRunning(report) {
+		addCheck(result, check)
 		return
 	}
-	if len(r.Warnings) > 0 {
-		r.Status = VerificationWarning
-		r.Message = "Verification completed with warnings"
+	if primaryService(report) != nil && serviceExecutableExists(report) && opts.AllowStoppedServiceWarning {
+		check.Status = VerificationWarning
+		check.Message = "Service exists and executable exists, but service is not running"
+		addCheck(result, check)
 		return
 	}
-	r.Status = VerificationSuccess
-	r.Message = "Verification succeeded"
+	check.Status = VerificationFailed
+	check.Message = "Primary service is not running"
+	check.Error = check.Message
+	addCheck(result, check)
 }
 
-func statusForHealth(health detector.GrabberHealthStatus) CheckStatus {
-	if health == detector.GrabberHealthHealthy {
-		return CheckSuccess
+func addImagePathCheck(result *VerificationResult, report detector.DetectionReport) {
+	check := VerificationCheck{Name: "service_image_path_usable", Target: report.PrimaryServiceImagePath, Status: VerificationPassed, Message: "Service ImagePath is usable"}
+	if !serviceImagePathUsable(report) {
+		check.Status = VerificationFailed
+		check.Message = "Service ImagePath could not be parsed"
+		check.Error = check.Message
 	}
-	return CheckFailed
+	addCheck(result, check)
 }
 
-func requiredStringStatus(value string) CheckStatus {
-	if strings.TrimSpace(value) == "" {
-		return CheckFailed
+func addExecutableCheck(result *VerificationResult, report detector.DetectionReport) {
+	check := VerificationCheck{Name: "service_executable_exists", Target: report.ServiceExecutablePath, Status: VerificationPassed, Message: "Service executable exists"}
+	if !serviceExecutableExists(report) {
+		check.Status = VerificationFailed
+		check.Message = "Service executable is missing"
+		check.Error = check.Message
 	}
-	return CheckSuccess
+	addCheck(result, check)
 }
 
-func requiredStringMessage(name string, value string) string {
-	if strings.TrimSpace(value) == "" {
-		return name + " was not detected"
+func addProcessCheck(result *VerificationResult, report detector.DetectionReport) {
+	found, name := expectedProcessRunning(report)
+	check := VerificationCheck{Name: "expected_process_running", Target: report.InstallRoot, Status: VerificationPassed}
+	if found {
+		check.Message = name + " running"
+		result.ProcessStatus = "found"
+		addCheck(result, check)
+		return
 	}
-	return name + " detected"
+	result.ProcessStatus = "warning"
+	check.Status = VerificationWarning
+	if serviceRunning(report) {
+		check.Message = "No matching Grabber process was detected, but service is running"
+	} else {
+		check.Message = "No matching Grabber process was detected"
+	}
+	addCheck(result, check)
 }
 
-func installModeStatus(mode detector.InstallMode) CheckStatus {
-	if mode == detector.InstallModeUnknown || mode == detector.InstallModeNotInstalled || strings.TrimSpace(string(mode)) == "" {
-		return CheckFailed
+func addDefenderCheck(result *VerificationResult, report detector.DetectionReport, opts VerifyOptions) {
+	check := VerificationCheck{Name: "defender_exclusion_covered", Target: strings.Join(report.RequiredDefenderPaths, "; "), Status: VerificationPassed, Message: "Defender exclusion covers detected install root"}
+	if defenderCovered(report) {
+		result.DefenderStatus = "present"
+		addCheck(result, check)
+		return
 	}
-	return CheckSuccess
-}
-
-func boolStatus(value bool) CheckStatus {
-	if value {
-		return CheckSuccess
-	}
-	return CheckFailed
-}
-
-func boolMessage(message string, value bool) string {
-	if value {
-		return message
-	}
-	return message + ": no"
-}
-
-func primaryServiceState(report detector.DetectionReport) (bool, bool) {
-	for _, service := range report.Services {
-		if strings.EqualFold(service.Name, report.PrimaryService) {
-			return service.Exists, strings.EqualFold(service.Status, "running")
-		}
-	}
-	for _, service := range report.Services {
-		if service.Exists {
-			return true, strings.EqualFold(service.Status, "running")
-		}
-	}
-	return false, false
-}
-
-func processCheck(report detector.DetectionReport) (CheckStatus, string, string) {
-	if len(report.Processes) == 0 {
-		return CheckWarning, "", "Expected Grabber process was not detected"
-	}
-	serviceExecutable := normalizeOptionalPath(report.ServiceExecutablePath)
-	installRoot := normalizeOptionalPath(report.InstallRoot)
-	for _, process := range report.Processes {
-		processPath := normalizeOptionalPath(process.ExecutablePath)
-		target := process.Name
-		if process.ExecutablePath != "" {
-			target = process.ExecutablePath
-		}
-		if serviceExecutable != "" && strings.EqualFold(processPath, serviceExecutable) {
-			return CheckSuccess, target, "Expected Grabber process is running"
-		}
-		if installRoot != "" && detector.IsPathCoveredByExclusion(processPath, installRoot) {
-			return CheckSuccess, target, "Expected Grabber process is running"
-		}
-		if process.MatchedByExactPath {
-			return CheckSuccess, target, "Expected Grabber process is running"
-		}
-	}
-	return CheckWarning, "", "Grabber process query succeeded, but no process matched the detected install root"
-}
-
-func normalizeOptionalPath(path string) string {
-	if strings.TrimSpace(path) == "" {
-		return ""
-	}
-	return detector.NormalizeWindowsPath(path)
-}
-
-func defenderCheck(report detector.DetectionReport) (CheckStatus, string, string) {
-	target := strings.Join(report.RequiredDefenderPaths, "; ")
+	check.Status = VerificationWarning
 	if !report.Defender.Available {
-		return CheckWarning, target, "Defender exclusions could not be verified"
+		result.DefenderStatus = "unavailable"
+		check.Message = "Defender exclusions could not be verified"
+		if !opts.AllowDefenderUnavailable {
+			check.Status = VerificationFailed
+			check.Error = check.Message
+		}
+	} else {
+		result.DefenderStatus = "warning"
+		check.Message = "Defender exclusion is missing for detected install root"
 	}
-	if len(report.MissingDefenderPaths) > 0 {
-		return CheckWarning, strings.Join(report.MissingDefenderPaths, "; "), "Missing Defender exclusion coverage"
-	}
-	if len(report.RequiredDefenderPaths) == 0 {
-		return CheckSkipped, "", "No Defender exclusion path is required for the detected state"
-	}
-	return CheckSuccess, target, "Defender exclusion coverage is present"
+	addCheck(result, check)
 }
 
-func msiLogCheck(opts Options) (CheckStatus, string, string) {
-	if !opts.InstallExecuted {
-		return CheckSkipped, "", "MSI install was not executed in this verification scope"
+func addMSILogCheck(result *VerificationResult, path string) {
+	check := VerificationCheck{Name: "msi_install_log_exists", Target: path, Status: VerificationPassed, Message: "MSI install log exists"}
+	if !msiInstallLogExists(path) {
+		check.Status = VerificationWarning
+		check.Message = "MSI install log is missing"
+		result.MSIInstallLogState = "missing"
+	} else {
+		result.MSIInstallLogState = "present"
 	}
-	if strings.TrimSpace(opts.MSIInstallLog) == "" {
-		return CheckFailed, "", "MSI install log path was not provided"
+	addCheck(result, check)
+}
+
+func addCheck(result *VerificationResult, check VerificationCheck) {
+	result.Checks = append(result.Checks, check)
+	if check.Status == VerificationWarning && check.Message != "" {
+		result.Warnings = append(result.Warnings, check.Message)
 	}
-	cleanPath := filepath.Clean(opts.MSIInstallLog)
-	if _, err := os.Stat(cleanPath); err != nil {
-		return CheckFailed, cleanPath, "MSI install log does not exist"
+	if check.Status == VerificationFailed {
+		if check.Error != "" {
+			result.Errors = append(result.Errors, check.Error)
+		} else if check.Message != "" {
+			result.Errors = append(result.Errors, check.Message)
+		}
 	}
-	return CheckSuccess, cleanPath, "MSI install log exists"
+}
+
+func overallStatus(checks []VerificationCheck) VerificationStatus {
+	status := VerificationPassed
+	for _, check := range checks {
+		switch check.Status {
+		case VerificationFailed:
+			return VerificationFailed
+		case VerificationWarning:
+			status = VerificationWarning
+		}
+	}
+	return status
 }

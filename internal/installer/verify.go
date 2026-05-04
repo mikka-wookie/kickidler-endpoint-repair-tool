@@ -1,9 +1,8 @@
 package installer
 
 import (
-	"strings"
-
 	"kigrepair/internal/detector"
+	"kigrepair/internal/verifier"
 )
 
 type VerificationStatus string
@@ -29,67 +28,17 @@ func VerifyInstall(msi MSIResult, final detector.DetectionReport) VerificationRe
 			Message: "MSI install failed",
 		}
 	}
-
-	serviceExists, serviceRunning := primaryServiceState(final)
-	filesHealthy := final.ServiceExecutablePath != "" && final.ServiceExecutableExists
-	if !serviceExists {
-		return VerificationResult{
-			Status:  VerificationFailed,
-			Errors:  []string{"Known service was not found after install"},
-			Message: "Post-install verification failed",
-		}
+	result := verifier.VerifyInstallation(final, verifier.VerifyOptions{
+		AllowDefenderUnavailable:   true,
+		ExpectInstalledState:       true,
+		AllowStoppedServiceWarning: true,
+	})
+	switch result.OverallStatus {
+	case verifier.VerificationPassed:
+		return VerificationResult{Status: VerificationSuccess, Message: "Install completed successfully"}
+	case verifier.VerificationWarning:
+		return VerificationResult{Status: VerificationWarning, Warnings: result.Warnings, Message: "Install completed with warning"}
+	default:
+		return VerificationResult{Status: VerificationFailed, Errors: result.Errors, Message: "Post-install verification failed"}
 	}
-	if !filesHealthy {
-		return VerificationResult{
-			Status:  VerificationFailed,
-			Errors:  []string{"Service executable is missing after install"},
-			Message: "Post-install verification failed",
-		}
-	}
-	if final.Health == detector.GrabberHealthBroken || final.Health == detector.GrabberHealthNotInstalled || final.Health == detector.GrabberHealthUnknown {
-		return VerificationResult{
-			Status:  VerificationFailed,
-			Errors:  []string{"Final health is " + string(final.Health)},
-			Message: "Post-install verification failed",
-		}
-	}
-
-	var warnings []string
-	if !serviceRunning {
-		warnings = append(warnings, "Service exists and executable exists, but service is not running")
-	}
-	warnings = append(warnings, defenderWarnings(final)...)
-	if len(warnings) > 0 {
-		return VerificationResult{
-			Status:   VerificationWarning,
-			Warnings: warnings,
-			Message:  "Install completed with warning",
-		}
-	}
-	return VerificationResult{Status: VerificationSuccess, Message: "Install completed successfully"}
-}
-
-func primaryServiceState(report detector.DetectionReport) (bool, bool) {
-	for _, service := range report.Services {
-		if strings.EqualFold(service.Name, report.PrimaryService) {
-			return service.Exists, strings.EqualFold(service.Status, "running")
-		}
-	}
-	for _, service := range report.Services {
-		if service.Exists {
-			return true, strings.EqualFold(service.Status, "running")
-		}
-	}
-	return false, false
-}
-
-func defenderWarnings(report detector.DetectionReport) []string {
-	var warnings []string
-	for _, path := range report.MissingDefenderPaths {
-		warnings = append(warnings, "Missing Defender exclusion: "+path)
-	}
-	if !report.Defender.Available && report.InstallRoot != "" {
-		warnings = append(warnings, "Defender exclusions could not be verified")
-	}
-	return warnings
 }

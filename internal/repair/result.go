@@ -5,6 +5,7 @@ import (
 
 	"kigrepair/internal/app"
 	"kigrepair/internal/installer"
+	"kigrepair/internal/verifier"
 )
 
 const (
@@ -39,6 +40,7 @@ type RepairResult struct {
 	FinalHealth         string                         `json:"final_health"`
 	FinalInstallMode    string                         `json:"final_install_mode"`
 	FinalInstallRoot    string                         `json:"final_install_root"`
+	Verification        *verifier.VerificationResult   `json:"verification_result,omitempty"`
 	RebootRequired      bool                           `json:"reboot_required"`
 	Warnings            []string                       `json:"warnings"`
 	Errors              []string                       `json:"errors"`

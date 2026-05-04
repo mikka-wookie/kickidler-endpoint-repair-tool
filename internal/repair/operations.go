@@ -10,6 +10,7 @@ import (
 	"kigrepair/internal/detector"
 	"kigrepair/internal/installer"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/verifier"
 )
 
 func addOperation(ctx *app.AppContext, step string, target string, status app.OperationStatus, message string, errText string) {
@@ -87,17 +88,6 @@ func decisionMessage(decision Decision) string {
 	return fmt.Sprintf("cleanup=%t install=%t defender=%t", decision.CleanupNeeded, decision.InstallNeeded, decision.DefenderNeeded)
 }
 
-func verificationStatus(verification Verification) app.OperationStatus {
-	switch verification.Status {
-	case "success":
-		return app.OperationStatusSuccess
-	case "warning":
-		return app.OperationStatusWarning
-	default:
-		return app.OperationStatusFailed
-	}
-}
-
 func cleanupFailed(results []app.OperationResult) bool {
 	for _, result := range results {
 		if isCleanupExecutionStep(result.Step) && result.Status == app.OperationStatusFailed {
@@ -130,17 +120,17 @@ func isCleanupExecutionStep(step string) bool {
 	}
 }
 
-func finalExitCode(msi installer.MSIResult, verification Verification, results []app.OperationResult, defenderRan bool) int {
+func finalExitCode(msi installer.MSIResult, verification verifier.VerificationResult, results []app.OperationResult, defenderRan bool) int {
 	if !msi.Success {
 		return ExitInstallFailed
 	}
-	if verification.Status == "failed" {
+	if verification.OverallStatus == verifier.VerificationFailed {
 		return ExitVerificationFailed
 	}
-	if msi.RebootRequired && verification.Status != "failed" {
+	if msi.RebootRequired && verification.OverallStatus != verifier.VerificationFailed {
 		return ExitRebootRequired
 	}
-	if verification.Status == "warning" || cleanupWarning(results) || cleanupFailed(results) || defenderFailed(results) {
+	if verification.OverallStatus == verifier.VerificationWarning || cleanupWarning(results) || cleanupFailed(results) || defenderFailed(results) {
 		return ExitWarnings
 	}
 	if defenderRan && defenderFailed(results) {

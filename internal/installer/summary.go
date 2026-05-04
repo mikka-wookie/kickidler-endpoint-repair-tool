@@ -7,6 +7,7 @@ import (
 
 	"kigrepair/internal/detector"
 	"kigrepair/internal/reports"
+	"kigrepair/internal/verifier"
 )
 
 func FormatInstallSummary(result InstallResult, final *detector.DetectionReport) string {
@@ -44,6 +45,10 @@ func FormatInstallSummary(result InstallResult, final *detector.DetectionReport)
 	}
 	if result.ExitCode == ExitInstallWarnings || len(result.Warnings) > 0 {
 		b.WriteString("Install completed with warning\n\n")
+	}
+	if result.Verification != nil {
+		b.WriteString(verifierSummary(*result.Verification))
+		b.WriteString("\n")
 	}
 	if len(result.Warnings) > 0 {
 		b.WriteString("Warnings:\n")
@@ -93,6 +98,10 @@ func FormatInstallSummary(result InstallResult, final *detector.DetectionReport)
 		Errors:         result.Errors,
 		Actions:        []string{"MSI install: " + valueOrDash(result.MSI.Status)},
 	}, b.String())
+}
+
+func verifierSummary(result verifier.VerificationResult) string {
+	return verifier.FormatSummary(result)
 }
 
 func finishedOrNow(value time.Time) time.Time {

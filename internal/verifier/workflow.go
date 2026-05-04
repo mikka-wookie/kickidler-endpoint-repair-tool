@@ -48,26 +48,29 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 	ctx.Logger.Info("wrote initial-detection.json")
 
 	ctx.Logger.Info("verification start")
-	result := Verify(final, Options{InstallExecuted: w.InstallExecuted, MSIInstallLog: w.MSIInstallLog})
+	result := VerifyInstallation(final, VerifyOptions{
+		InstallExecuted:            w.InstallExecuted,
+		MSIInstallLogPath:          w.MSIInstallLog,
+		RequireRunningProcess:      true,
+		AllowDefenderUnavailable:   true,
+		ExpectInstalledState:       true,
+		AllowStoppedServiceWarning: true,
+	})
 	result.Command = "verify"
 	result.StartedAt = startedAt
 	result.FinishedAt = time.Now()
 	result.Mode = string(ctx.Mode)
 	result.ReportDir = ctx.OutputDir
-	result.ExitCode = ExitCode(result.Status)
-	result.Health = string(final.Health)
-	result.InstallMode = string(final.InstallMode)
-	result.InstallRoot = final.InstallRoot
-	result.PrimaryService = final.PrimaryService
+	result.ExitCode = ExitCode(result.OverallStatus)
 	ctx.ExitCode = result.ExitCode
 	ctx.JSONValue = result
-	ctx.Logger.Info("verification end: status=%s", result.Status)
+	ctx.Logger.Info("verification end: status=%s", result.OverallStatus)
 
 	operation := app.OperationResult{
 		Step:      "verify.final",
 		Target:    "grabber",
-		Status:    operationStatus(result.Status),
-		Message:   result.Message,
+		Status:    operationStatus(result.OverallStatus),
+		Message:   "Final verification result: " + string(result.OverallStatus),
 		Error:     strings.Join(result.Errors, "; "),
 		Timestamp: time.Now(),
 	}
@@ -87,7 +90,7 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 		return err
 	}
 	ctx.Logger.Info("wrote summary.txt")
-	ctx.Logger.Info("final status: %s", result.Status)
+	ctx.Logger.Info("final status: %s", result.OverallStatus)
 	ctx.Logger.Info("final exit code: %d", ctx.ExitCode)
 	if !ctx.Quiet && !ctx.JSONOutput {
 		fmt.Print(FormatConsoleSummary(result))
@@ -97,23 +100,12 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 
 func ExitCode(status VerificationStatus) int {
 	switch status {
-	case VerificationSuccess:
+	case VerificationPassed:
 		return app.ExitSuccess
-	case VerificationWarning:
+	case VerificationWarning, VerificationSkipped:
 		return app.ExitWarnings
 	default:
 		return app.ExitVerificationFailed
-	}
-}
-
-func operationStatus(status VerificationStatus) app.OperationStatus {
-	switch status {
-	case VerificationSuccess:
-		return app.OperationStatusSuccess
-	case VerificationWarning:
-		return app.OperationStatusWarning
-	default:
-		return app.OperationStatusFailed
 	}
 }
 

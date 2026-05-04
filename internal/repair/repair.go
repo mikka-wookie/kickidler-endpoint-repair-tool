@@ -14,6 +14,8 @@ import (
 	"kigrepair/internal/defender"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/installer"
+	"kigrepair/internal/logging"
+	"kigrepair/internal/verifier"
 )
 
 type CleanupExecutor interface {
@@ -220,11 +222,22 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 	}
 	addOperation(ctx, "final_detection", "grabber", detectionStatus(final), "Final detection completed with health: "+string(final.Health), "")
 
-	verification := VerifyFinalState(final)
+	verification := verifier.VerifyInstallation(final, verifier.VerifyOptions{
+		InstallExecuted:            result.InstallExecuted,
+		MSIInstallLogPath:          msiInstallLogPath(ctx.OutputDir),
+		RequireRunningProcess:      true,
+		AllowDefenderUnavailable:   true,
+		ExpectInstalledState:       true,
+		AllowStoppedServiceWarning: true,
+	})
+	result.Verification = &verification
 	result.Warnings = append(result.Warnings, verification.Warnings...)
 	result.Errors = append(result.Errors, verification.Errors...)
-	addOperation(ctx, "final_verification", "grabber", verificationStatus(verification), verification.Message, strings.Join(verification.Errors, "; "))
-	ctx.Logger.Info("final verification result: %s", verification.Status)
+	for _, operation := range verifier.Operations(verification) {
+		ctx.AddResult(operation)
+		logging.LogOperation(ctx.Logger, operation)
+	}
+	ctx.Logger.Info("final verification result: %s", verification.OverallStatus)
 
 	ctx.ExitCode = finalExitCode(msi, verification, ctx.Results, defenderRan)
 	return w.finish(ctx, result, &final)
@@ -286,6 +299,11 @@ func (w RepairWorkflow) finish(ctx *app.AppContext, result RepairResult, final *
 	addOperation(ctx, "repair_completed", "grabber", status, fmt.Sprintf("Repair workflow completed with exit code %d", ctx.ExitCode), strings.Join(result.Errors, "; "))
 	if err := ctx.Reporter.WriteJSON("repair-result", result); err != nil {
 		return err
+	}
+	if result.Verification != nil {
+		if err := ctx.Reporter.WriteJSON("verification-result", result.Verification); err != nil {
+			return err
+		}
 	}
 	if err := ctx.Reporter.WriteOperations(ctx.Results); err != nil {
 		return err
