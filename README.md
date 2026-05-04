@@ -52,9 +52,9 @@ Command-specific files:
 - `check`: `initial-detection.json`
 - `cleanup --dry-run`: `initial-detection.json`, `cleanup-plan.json`
 - `cleanup`: `initial-detection.json`, `cleanup-plan.json`, `final-detection.json`, `msi-uninstall.log` when MSI uninstall runs
-- `install`: `initial-detection.json`, `final-detection.json`, `install-result.json`, `msi-install.log`
+- `install`: `initial-detection.json`, `final-detection.json`, `verification-result.json`, `install-result.json`, `msi-install.log`
 - `defender`: `initial-detection.json`, `defender-result.json`, and `final-detection.json` when `--ensure` verifies final state
-- `repair`: `initial-detection.json`, `final-detection.json`, `repair-result.json`, `cleanup-plan.json`, `install-result.json` when install runs, `defender-result.json` when Defender ensure runs, MSI logs when relevant
+- `repair`: `initial-detection.json`, `final-detection.json`, `verification-result.json`, `repair-result.json`, `cleanup-plan.json`, `install-result.json` when install runs, `defender-result.json` when Defender ensure runs, MSI logs when relevant
 - `collect-report`: `detection.json`, `system.json`, `services.json`, `processes.json`, `defender.json`, `registry.json`, `collect-result.json`, and `kigrepair-support-bundle.zip` unless `--no-zip` is used
 
 `operations.json` is a JSON array of operation results. Each operation contains `step`, `target`, `status`, `message`, optional `error`, and `timestamp`.
@@ -161,6 +161,12 @@ For commands that support `--json`, stdout contains exactly one JSON object. Hum
 - `defender --ensure` requires `--yes`
 
 `install` does not require `--yes` when a valid invite and installer are provided. All system-changing workflows still require administrator rights.
+
+## Verification
+
+`install` and `repair` run final verification after final detection. The reusable verification layer checks final health, install mode/root, primary service state, service ImagePath parsing, service executable presence, expected Grabber process detection when available, Defender exclusion coverage, and the MSI install log when an install was executed.
+
+Service and executable checks are hard requirements. Missing Defender coverage, unavailable Defender detection, or no matching process can produce a warning instead of a hard failure when service/files are otherwise healthy. Results are written to `verification-result.json`, included in install/repair JSON output, summarized in `summary.txt`, and reflected in `operations.json`.
 
 ## Administrator Elevation
 

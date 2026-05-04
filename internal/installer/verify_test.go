@@ -35,12 +35,14 @@ func healthyReport(defenderMissing bool) detector.DetectionReport {
 		InstallMode:             detector.InstallModeStandard,
 		InstallRoot:             `C:\Program Files\TeleLinkSoft\bin`,
 		PrimaryService:          "ngs",
+		PrimaryServiceImagePath: `C:\Program Files\TeleLinkSoft\bin\grabber2.exe`,
 		ServiceExecutablePath:   `C:\Program Files\TeleLinkSoft\bin\grabber2.exe`,
 		ServiceExecutableExists: true,
+		RequiredDefenderPaths:   []string{`C:\Program Files\TeleLinkSoft\bin`},
 		Services: []detector.ServiceState{
 			{Name: "ngs", Exists: true, Status: "running"},
 		},
-		Defender: detector.DefenderState{Available: true},
+		Defender: detector.DefenderState{Available: true, ExclusionPaths: []string{`C:\Program Files\TeleLinkSoft\bin`}},
 	}
 	if defenderMissing {
 		report.MissingDefenderPaths = []string{`C:\Program Files\TeleLinkSoft\bin`}

@@ -10,8 +10,12 @@ import (
 	"kigrepair/internal/installer"
 )
 
+func msiInstallLogPath(outputDir string) string {
+	return filepath.Join(outputDir, "msi-install.log")
+}
+
 func (w RepairWorkflow) runInstall(ctx *app.AppContext, installerPath string, invite string) installer.MSIResult {
-	msiLogPath := filepath.Join(ctx.OutputDir, "msi-install.log")
+	msiLogPath := msiInstallLogPath(ctx.OutputDir)
 	executor := w.MSIExecutor
 	if executor == nil {
 		executor = installer.ExecMSIExecutor{}

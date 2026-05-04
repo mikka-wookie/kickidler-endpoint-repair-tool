@@ -12,6 +12,7 @@ import (
 	"kigrepair/internal/installer"
 	"kigrepair/internal/logging"
 	"kigrepair/internal/reports"
+	"kigrepair/internal/verifier"
 )
 
 type fakeCleanupExecutor struct {
@@ -31,6 +32,9 @@ type fakeMSIExecutor struct {
 
 func (e *fakeMSIExecutor) Install(installerPath string, invite string, logPath string) installer.CommandResult {
 	e.ran = true
+	if e.code == 0 || e.code == 3010 {
+		_ = os.WriteFile(logPath, []byte("msi log"), 0644)
+	}
 	return installer.CommandResult{ExitCode: e.code}
 }
 
@@ -281,19 +285,19 @@ func TestRepairWorkflowConfirmationRules(t *testing.T) {
 }
 
 func TestFinalExitCode(t *testing.T) {
-	if got := finalExitCode(installer.MSIResult{Success: false}, Verification{Status: "success"}, nil, false); got != ExitInstallFailed {
+	if got := finalExitCode(installer.MSIResult{Success: false}, verifier.VerificationResult{OverallStatus: verifier.VerificationPassed}, nil, false); got != ExitInstallFailed {
 		t.Fatalf("install failed exit = %d", got)
 	}
-	if got := finalExitCode(installer.MSIResult{Success: true}, Verification{Status: "failed"}, nil, false); got != ExitVerificationFailed {
+	if got := finalExitCode(installer.MSIResult{Success: true}, verifier.VerificationResult{OverallStatus: verifier.VerificationFailed}, nil, false); got != ExitVerificationFailed {
 		t.Fatalf("verification failed exit = %d", got)
 	}
-	if got := finalExitCode(installer.MSIResult{Success: true, RebootRequired: true}, Verification{Status: "success"}, nil, false); got != ExitRebootRequired {
+	if got := finalExitCode(installer.MSIResult{Success: true, RebootRequired: true}, verifier.VerificationResult{OverallStatus: verifier.VerificationPassed}, nil, false); got != ExitRebootRequired {
 		t.Fatalf("reboot exit = %d", got)
 	}
-	if got := finalExitCode(installer.MSIResult{Success: true}, Verification{Status: "warning"}, nil, false); got != ExitWarnings {
+	if got := finalExitCode(installer.MSIResult{Success: true}, verifier.VerificationResult{OverallStatus: verifier.VerificationWarning}, nil, false); got != ExitWarnings {
 		t.Fatalf("warning exit = %d", got)
 	}
-	if got := finalExitCode(installer.MSIResult{Success: true}, Verification{Status: "success"}, []app.OperationResult{{Step: "defender_ensure", Status: app.OperationStatusFailed}}, true); got != ExitWarnings {
+	if got := finalExitCode(installer.MSIResult{Success: true}, verifier.VerificationResult{OverallStatus: verifier.VerificationPassed}, []app.OperationResult{{Step: "defender_ensure", Status: app.OperationStatusFailed}}, true); got != ExitWarnings {
 		t.Fatalf("defender failed exit = %d", got)
 	}
 }
@@ -355,6 +359,7 @@ func healthyReport(missingDefender []string) detector.DetectionReport {
 		InstallMode:             detector.InstallModeStandard,
 		InstallRoot:             root,
 		PrimaryService:          "ngs",
+		PrimaryServiceImagePath: root + `\grabber2.exe`,
 		ServiceExecutablePath:   root + `\grabber2.exe`,
 		ServiceExecutableExists: true,
 		RequiredDefenderPaths:   []string{root},
@@ -370,6 +375,11 @@ func healthyReport(missingDefender []string) detector.DetectionReport {
 			ExclusionPaths: exclusionsFor(root, missingDefender),
 			MissingPaths:   missingDefender,
 		},
+		Processes: []detector.ProcessState{{
+			Name:           "grabber2.exe",
+			ExecutablePath: root + `\grabber2.exe`,
+			MatchedByName:  true,
+		}},
 	}
 }
 

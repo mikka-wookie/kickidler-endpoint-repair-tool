@@ -5,25 +5,28 @@ import (
 	"strings"
 	"time"
 
-	"kigrepair/internal/detector"
 	"kigrepair/internal/reports"
 )
 
 func FormatSummary(result VerificationResult) string {
-	report := result.Detection
 	var b strings.Builder
 	b.WriteString("Kigrepair Verify\n\n")
-	b.WriteString("Verification: " + string(result.Status) + "\n")
-	b.WriteString("Health: " + string(report.Health) + "\n")
-	b.WriteString("Install mode: " + string(report.InstallMode) + "\n")
-	b.WriteString("Install root: " + valueOrDash(report.InstallRoot) + "\n")
-	b.WriteString("Primary service: " + valueOrDash(report.PrimaryService) + "\n")
-	b.WriteString("Service status: " + serviceStatus(report) + "\n")
-	b.WriteString("Primary service running: " + yesNo(primaryServiceRunning(report)) + "\n")
-	b.WriteString("Service executable: " + valueOrDash(report.ServiceExecutablePath) + "\n")
-	b.WriteString("Service executable exists: " + yesNo(strings.TrimSpace(report.ServiceExecutablePath) != "" && report.ServiceExecutableExists) + "\n")
-	b.WriteString("Expected process running: " + expectedProcessRunning(result) + "\n")
-	b.WriteString("Defender exclusion: " + defenderExclusionStatus(report) + "\n")
+	b.WriteString("Verification: " + string(result.OverallStatus) + "\n")
+	b.WriteString("Health: " + valueOrDash(result.Health) + "\n")
+	b.WriteString("Install mode: " + valueOrDash(result.InstallMode) + "\n")
+	b.WriteString("Install root: " + valueOrDash(result.InstallRoot) + "\n")
+	b.WriteString("Primary service: " + valueOrDash(result.PrimaryService) + "\n")
+	b.WriteString("Service status: " + valueOrDash(result.ServiceStatus) + "\n")
+	b.WriteString("Service executable: " + valueOrDash(result.ServiceExecutable) + "\n")
+	if result.ProcessStatus != "" {
+		b.WriteString("Expected process running: " + processWord(result.ProcessStatus) + "\n")
+	}
+	if result.DefenderStatus != "" {
+		b.WriteString("Defender exclusion: " + result.DefenderStatus + "\n")
+	}
+	if result.MSIInstallLogState != "" {
+		b.WriteString("MSI install log: " + result.MSIInstallLogState + "\n")
+	}
 	b.WriteString(fmt.Sprintf("Exit code: %d\n\n", result.ExitCode))
 	b.WriteString("Checks:\n")
 	for _, check := range result.Checks {
@@ -38,47 +41,41 @@ func FormatSummary(result VerificationResult) string {
 	writeList(&b, "Errors", result.Errors)
 	b.WriteString("Next recommended support action:\n")
 	b.WriteString("- " + nextAction(result) + "\n\n")
-	b.WriteString("Report:\n")
-	b.WriteString(result.ReportDir)
-	b.WriteString("\n")
+	if result.ReportDir != "" {
+		b.WriteString("Report:\n")
+		b.WriteString(result.ReportDir)
+		b.WriteString("\n")
+	}
 
 	return reports.FormatSummary(reports.SummaryData{
-		Command:        "verify",
+		Command:        commandOrVerify(result.Command),
 		Started:        result.StartedAt,
 		Finished:       finishedOrNow(result.FinishedAt),
 		Mode:           result.Mode,
 		ExitCode:       result.ExitCode,
 		ReportDir:      result.ReportDir,
-		FinalHealth:    string(report.Health),
-		InstallMode:    string(report.InstallMode),
-		InstallRoot:    report.InstallRoot,
-		PrimaryService: report.PrimaryService,
+		FinalHealth:    result.Health,
+		InstallMode:    result.InstallMode,
+		InstallRoot:    result.InstallRoot,
+		PrimaryService: result.PrimaryService,
 		Warnings:       result.Warnings,
 		Errors:         result.Errors,
-		Actions:        []string{"Verification: " + string(result.Status)},
+		Actions:        []string{"Verification: " + string(result.OverallStatus)},
 	}, b.String())
 }
 
 func FormatConsoleSummary(result VerificationResult) string {
-	report := result.Detection
 	var b strings.Builder
 	b.WriteString("Kigrepair Verify\n\n")
 	b.WriteString("Report directory: " + valueOrDash(result.ReportDir) + "\n")
-	b.WriteString("Detected health: " + string(report.Health) + "\n")
-	b.WriteString("Install mode: " + string(report.InstallMode) + "\n")
-	b.WriteString("Install root: " + valueOrDash(report.InstallRoot) + "\n")
-	b.WriteString("Verification status: " + string(result.Status) + "\n\n")
+	b.WriteString("Detected health: " + valueOrDash(result.Health) + "\n")
+	b.WriteString("Install mode: " + valueOrDash(result.InstallMode) + "\n")
+	b.WriteString("Install root: " + valueOrDash(result.InstallRoot) + "\n")
+	b.WriteString("Verification status: " + string(result.OverallStatus) + "\n\n")
 	writeNonSuccessChecks(&b, result)
 	b.WriteString("Suggested next action:\n")
 	b.WriteString("- " + nextAction(result) + "\n")
 	return b.String()
-}
-
-func finishedOrNow(value time.Time) time.Time {
-	if value.IsZero() {
-		return time.Now()
-	}
-	return value
 }
 
 func valueOrDash(value string) string {
@@ -88,87 +85,35 @@ func valueOrDash(value string) string {
 	return value
 }
 
-func serviceStatus(report detector.DetectionReport) string {
-	if report.PrimaryService == "" {
-		return "-"
+func finishedOrNow(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Now()
 	}
-	for _, service := range report.Services {
-		if strings.EqualFold(service.Name, report.PrimaryService) {
-			if service.Status != "" {
-				return service.Status
-			}
-			if service.Exists {
-				return "exists"
-			}
-		}
-	}
-	return "-"
+	return value
 }
 
-func defenderExclusionStatus(report detector.DetectionReport) string {
-	if !report.Defender.Available {
-		return "unavailable"
+func commandOrVerify(command string) string {
+	if strings.TrimSpace(command) == "" {
+		return "verify"
 	}
-	if len(report.MissingDefenderPaths) > 0 {
-		return "missing"
-	}
-	if len(report.RequiredDefenderPaths) > 0 {
-		return "present"
-	}
-	return "-"
+	return command
 }
 
-func primaryServiceRunning(report detector.DetectionReport) bool {
-	for _, service := range report.Services {
-		if strings.EqualFold(service.Name, report.PrimaryService) {
-			return strings.EqualFold(service.Status, "running")
-		}
+func processWord(status string) string {
+	if status == "found" {
+		return "yes"
 	}
-	return false
-}
-
-func expectedProcessRunning(result VerificationResult) string {
-	for _, check := range result.Checks {
-		if check.Name == "expected_grabber_process_running" {
-			switch check.Status {
-			case CheckSuccess:
-				return "yes"
-			case CheckSkipped:
-				return "not checked"
-			case CheckWarning:
-				return "not detected"
-			default:
-				return "no"
-			}
-		}
-	}
-	return "not checked"
+	return "not detected"
 }
 
 func nextAction(result VerificationResult) string {
-	switch result.Detection.Health {
-	case detector.GrabberHealthHealthy:
-		if result.Status != VerificationFailed {
-			return "No repair required."
-		}
-	case detector.GrabberHealthBroken, detector.GrabberHealthPartiallyRemoved:
-		return "Run repair with a valid installer and invite."
-	case detector.GrabberHealthNotInstalled:
-		return "Install Grabber or run repair with installer and invite, depending on support case."
-	case detector.GrabberHealthUnknown:
-		return "Review detection and verification JSON files."
+	if result.OverallStatus == VerificationPassed {
+		return "No repair required."
 	}
-	if result.Status == VerificationFailed {
+	if result.OverallStatus == VerificationFailed {
 		return "Run repair with a valid installer and invite."
 	}
 	return "Review detection and verification JSON files."
-}
-
-func yesNo(value bool) string {
-	if value {
-		return "yes"
-	}
-	return "no"
 }
 
 func writeList(b *strings.Builder, name string, values []string) {
@@ -186,7 +131,7 @@ func writeList(b *strings.Builder, name string, values []string) {
 func writeNonSuccessChecks(b *strings.Builder, result VerificationResult) {
 	wrote := false
 	for _, check := range result.Checks {
-		if check.Status != CheckFailed && check.Status != CheckWarning {
+		if check.Status != VerificationFailed && check.Status != VerificationWarning {
 			continue
 		}
 		if !wrote {

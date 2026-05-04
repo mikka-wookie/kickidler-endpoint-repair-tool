@@ -11,6 +11,7 @@ import (
 	"kigrepair/internal/checks"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/verifier"
 )
 
 type InstallWorkflow struct {
@@ -131,22 +132,22 @@ func (w InstallWorkflow) Run(ctx *app.AppContext) error {
 		return err
 	}
 
-	verification := VerifyInstall(msi, final)
+	verification := verifier.VerifyInstallation(final, verifier.VerifyOptions{
+		InstallExecuted:            true,
+		MSIInstallLogPath:          msiLogPath,
+		RequireRunningProcess:      true,
+		AllowDefenderUnavailable:   true,
+		ExpectInstalledState:       true,
+		AllowStoppedServiceWarning: true,
+	})
+	result.Verification = &verification
 	result.Warnings = append(result.Warnings, verification.Warnings...)
 	result.Errors = append(result.Errors, verification.Errors...)
-	ctx.Logger.Info("final verification result: %s", verification.Status)
-	verifyOperation := app.OperationResult{
-		Step:      "install.verify",
-		Target:    "grabber",
-		Status:    verificationOperationStatus(verification),
-		Message:   verification.Message,
-		Timestamp: time.Now(),
+	ctx.Logger.Info("final verification result: %s", verification.OverallStatus)
+	for _, operation := range verifier.Operations(verification) {
+		ctx.AddResult(operation)
+		logging.LogOperation(ctx.Logger, operation)
 	}
-	if len(verification.Errors) > 0 {
-		verifyOperation.Error = strings.Join(verification.Errors, "; ")
-	}
-	ctx.AddResult(verifyOperation)
-	logging.LogOperation(ctx.Logger, verifyOperation)
 
 	ctx.ExitCode = installExitCode(msi, verification)
 	result.ExitCode = ctx.ExitCode
@@ -155,6 +156,9 @@ func (w InstallWorkflow) Run(ctx *app.AppContext) error {
 	ctx.Logger.Info("final exit code: %d", ctx.ExitCode)
 
 	if err := ctx.Reporter.WriteJSON("install-result", result); err != nil {
+		return err
+	}
+	if err := ctx.Reporter.WriteJSON("verification-result", verification); err != nil {
 		return err
 	}
 	if err := ctx.Reporter.WriteOperations(ctx.Results); err != nil {
@@ -259,28 +263,17 @@ func msiOperationStatus(result MSIResult) app.OperationStatus {
 	return app.OperationStatusSuccess
 }
 
-func verificationOperationStatus(result VerificationResult) app.OperationStatus {
-	switch result.Status {
-	case VerificationSuccess:
-		return app.OperationStatusSuccess
-	case VerificationWarning:
-		return app.OperationStatusWarning
-	default:
-		return app.OperationStatusFailed
-	}
-}
-
-func installExitCode(msi MSIResult, verification VerificationResult) int {
+func installExitCode(msi MSIResult, verification verifier.VerificationResult) int {
 	if !msi.Success {
 		return ExitInstallMSIFailed
 	}
-	if verification.Status == VerificationFailed {
+	if verification.OverallStatus == verifier.VerificationFailed {
 		return ExitInstallVerificationFailed
 	}
 	if msi.RebootRequired {
 		return ExitInstallRebootRequired
 	}
-	if verification.Status == VerificationWarning {
+	if verification.OverallStatus == verifier.VerificationWarning {
 		return ExitInstallWarnings
 	}
 	return ExitInstallSuccess

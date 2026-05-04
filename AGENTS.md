@@ -681,6 +681,8 @@ Preferred implementation order:
 10. self-elevation/UAC
 11. GUI
 
+Final verification should stay reusable across install, repair, future verify commands, and future GUI entrypoints. Service and executable checks are hard requirements; Defender and process detection warnings should not automatically fail repair in the MVP when service/files are healthy.
+
 Do not implement multiple future features in one task unless explicitly requested.
 
 ## Response format after changes

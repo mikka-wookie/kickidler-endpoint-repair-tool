@@ -7,6 +7,7 @@ import (
 
 	"kigrepair/internal/detector"
 	"kigrepair/internal/reports"
+	"kigrepair/internal/verifier"
 )
 
 func FormatPreflight(report detector.DetectionReport, decision Decision, reportDir string) string {
@@ -72,6 +73,10 @@ func FormatSummary(result RepairResult, final *detector.DetectionReport) string 
 		b.WriteString("Reboot required: yes\n")
 	}
 	b.WriteString(fmt.Sprintf("Exit code: %d\n\n", result.ExitCode))
+	if result.Verification != nil {
+		b.WriteString(verifier.FormatSummary(*result.Verification))
+		b.WriteString("\n")
+	}
 	if len(result.Warnings) > 0 {
 		b.WriteString("Warnings:\n")
 		for _, warning := range unique(result.Warnings) {
