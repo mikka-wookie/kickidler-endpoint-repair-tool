@@ -10,6 +10,7 @@ import (
 
 	"kigrepair/internal/app"
 	"kigrepair/internal/checks"
+	"kigrepair/internal/classifier"
 	"kigrepair/internal/cleaner"
 	"kigrepair/internal/defender"
 	"kigrepair/internal/detector"
@@ -232,6 +233,8 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 		AllowStoppedServiceWarning: true,
 	})
 	result.Verification = &verification
+	classification := classifier.Classify(classifier.ClassificationInput{Detection: &final, Verification: &verification})
+	result.Classification = &classification
 	result.Warnings = append(result.Warnings, verification.Warnings...)
 	result.Errors = append(result.Errors, verification.Errors...)
 	for _, operation := range verifier.Operations(verification) {
@@ -283,16 +286,22 @@ func (w RepairWorkflow) confirm(ctx *app.AppContext, initial detector.DetectionR
 func (w RepairWorkflow) finish(ctx *app.AppContext, result RepairResult, final *detector.DetectionReport) error {
 	result.FinishedAt = time.Now()
 	result.ExitCode = ctx.ExitCode
+	var recommendationClassification *recommendations.ClassificationResult
+	if result.Classification != nil {
+		converted := recommendations.FromClassifier(*result.Classification)
+		recommendationClassification = &converted
+	}
 	recommendation := recommendations.Plan(recommendations.RecommendationInput{
-		Detection:     final,
-		Verification:  recommendationVerification(result.Verification),
-		InstallerPath: result.InstallerPath,
-		HasInstaller:  strings.TrimSpace(result.InstallerPath) != "" || result.InstallerResolution != nil,
-		HasInvite:     result.InviteProvided,
-		IsAdmin:       final == nil || final.IsAdmin,
-		IsInteractive: !ctx.NonInteractive && !ctx.Quiet,
-		OutputDir:     ctx.OutputDir,
-		RepairFailed:  repairHardFailed(ctx.ExitCode),
+		Detection:      final,
+		Verification:   recommendationVerification(result.Verification),
+		Classification: recommendationClassification,
+		InstallerPath:  result.InstallerPath,
+		HasInstaller:   strings.TrimSpace(result.InstallerPath) != "" || result.InstallerResolution != nil,
+		HasInvite:      result.InviteProvided,
+		IsAdmin:        final == nil || final.IsAdmin,
+		IsInteractive:  !ctx.NonInteractive && !ctx.Quiet,
+		OutputDir:      ctx.OutputDir,
+		RepairFailed:   repairHardFailed(ctx.ExitCode),
 	})
 	result.Recommendation = &recommendation
 	ctx.JSONValue = result
@@ -318,6 +327,11 @@ func (w RepairWorkflow) finish(ctx *app.AppContext, result RepairResult, final *
 	}
 	if result.Verification != nil {
 		if err := ctx.Reporter.WriteJSON("verification-result", result.Verification); err != nil {
+			return err
+		}
+	}
+	if result.Classification != nil {
+		if err := ctx.Reporter.WriteJSON("classification-result", result.Classification); err != nil {
 			return err
 		}
 	}

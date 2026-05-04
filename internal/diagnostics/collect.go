@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"kigrepair/internal/app"
+	"kigrepair/internal/classifier"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
 	"kigrepair/internal/recommendations"
@@ -58,15 +59,23 @@ func (w CollectReportWorkflow) Run(ctx *app.AppContext) error {
 	result.Health = string(detection.Health)
 	result.InstallMode = string(detection.InstallMode)
 	result.InstallRoot = detection.InstallRoot
+	classification := classifier.Classify(classifier.ClassificationInput{Detection: &detection})
+	result.Classification = &classification
+	recommendationClassification := recommendations.FromClassifier(classification)
 	recommendation := recommendations.Plan(recommendations.RecommendationInput{
-		Detection:     &detection,
-		IsAdmin:       detection.IsAdmin,
-		IsInteractive: !ctx.NonInteractive && !ctx.Quiet,
-		OutputDir:     ctx.OutputDir,
+		Detection:      &detection,
+		Classification: &recommendationClassification,
+		IsAdmin:        detection.IsAdmin,
+		IsInteractive:  !ctx.NonInteractive && !ctx.Quiet,
+		OutputDir:      ctx.OutputDir,
 	})
 	result.Recommendation = &recommendation
 	ctx.Logger.Info("admin status: %t", detection.IsAdmin)
 	ctx.Logger.Info("detected health/mode/root: %s / %s / %s", detection.Health, detection.InstallMode, detection.InstallRoot)
+	if err := ctx.Reporter.WriteJSON("classification-result", classification); err != nil {
+		return err
+	}
+	ctx.Logger.Info("Wrote classification-result.json")
 
 	collectors := w.collectors(detection)
 	for _, collector := range collectors {
@@ -319,6 +328,8 @@ func outputFilesFromResult(name string, result app.OperationResult) []string {
 	switch name {
 	case "detection":
 		return []string{"initial-detection.json"}
+	case "classification":
+		return []string{"classification-result.json"}
 	case "system":
 		return []string{filepath.ToSlash(filepath.Join("system", "environment.json"))}
 	case "services":

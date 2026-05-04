@@ -10,19 +10,20 @@ import (
 )
 
 var safeHistoryFiles = map[string]bool{
-	"summary.txt":            true,
-	"repair.log":             true,
-	"operations.json":        true,
-	"initial-detection.json": true,
-	"final-detection.json":   true,
-	"detection.json":         true,
-	"repair-result.json":     true,
-	"install-result.json":    true,
-	"defender-result.json":   true,
-	"cleanup-plan.json":      true,
-	"collect-result.json":    true,
-	"msi-install.log":        true,
-	"msi-uninstall.log":      true,
+	"summary.txt":                true,
+	"repair.log":                 true,
+	"operations.json":            true,
+	"initial-detection.json":     true,
+	"final-detection.json":       true,
+	"detection.json":             true,
+	"repair-result.json":         true,
+	"install-result.json":        true,
+	"defender-result.json":       true,
+	"classification-result.json": true,
+	"cleanup-plan.json":          true,
+	"collect-result.json":        true,
+	"msi-install.log":            true,
+	"msi-uninstall.log":          true,
 }
 
 type HistoryCollector struct {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"kigrepair/internal/classifier"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/recommendations"
 	"kigrepair/internal/reports"
@@ -84,6 +85,11 @@ func FormatSummary(result RepairResult, final *detector.DetectionReport) string 
 	}
 	if result.Verification == nil && result.Recommendation != nil {
 		b.WriteString(recommendations.FormatSection(*result.Recommendation))
+		b.WriteString("\n")
+	}
+	if result.Classification != nil {
+		b.WriteString(classifier.FormatSection(*result.Classification))
+		b.WriteString("\n")
 	}
 	if len(result.Warnings) > 0 {
 		b.WriteString("Warnings:\n")

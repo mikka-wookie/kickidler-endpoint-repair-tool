@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"kigrepair/internal/app"
+	"kigrepair/internal/classifier"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
 	"kigrepair/internal/recommendations"
@@ -64,15 +65,19 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 	result.ReportDir = ctx.OutputDir
 	result.ExitCode = ExitCode(result.OverallStatus)
 	ctx.ExitCode = result.ExitCode
+	classification := classifier.Classify(classifier.ClassificationInput{Detection: &final, Verification: &result})
+	recommendationClassification := recommendations.FromClassifier(classification)
 	recommendation := recommendations.Plan(recommendations.RecommendationInput{
-		Detection:     &final,
-		Verification:  recommendationVerification(result),
-		IsAdmin:       final.IsAdmin,
-		IsInteractive: !ctx.NonInteractive && !ctx.Quiet,
-		OutputDir:     ctx.OutputDir,
+		Detection:      &final,
+		Verification:   recommendationVerification(result),
+		Classification: &recommendationClassification,
+		IsAdmin:        final.IsAdmin,
+		IsInteractive:  !ctx.NonInteractive && !ctx.Quiet,
+		OutputDir:      ctx.OutputDir,
 	})
 	ctx.JSONValue = VerifyResult{
 		VerificationResult: result,
+		Classification:     classification,
 		Recommendation:     recommendation,
 	}
 	ctx.Logger.Info("verification end: status=%s", result.OverallStatus)
@@ -92,6 +97,10 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 		return err
 	}
 	ctx.Logger.Info("wrote verification-result.json")
+	if err := ctx.Reporter.WriteJSON("classification-result", classification); err != nil {
+		return err
+	}
+	ctx.Logger.Info("wrote classification-result.json")
 	if err := ctx.Reporter.WriteJSON("recommendation-result", recommendation); err != nil {
 		return err
 	}
@@ -100,7 +109,7 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 		return err
 	}
 	ctx.Logger.Info("wrote operations.json")
-	summary := FormatSummary(result, recommendation)
+	summary := FormatSummary(result, recommendation) + "\n" + classifier.FormatSection(classification)
 	if err := ctx.Reporter.WriteText("summary", summary); err != nil {
 		return err
 	}
@@ -109,12 +118,14 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 	ctx.Logger.Info("final exit code: %d", ctx.ExitCode)
 	if !ctx.Quiet && !ctx.JSONOutput {
 		fmt.Print(FormatConsoleSummary(result, recommendation))
+		fmt.Print(classifier.FormatConsole(classification))
 	}
 	return nil
 }
 
 type VerifyResult struct {
 	VerificationResult
+	Classification classifier.ClassificationResult      `json:"classification"`
 	Recommendation recommendations.RecommendationResult `json:"recommendation"`
 }
 
