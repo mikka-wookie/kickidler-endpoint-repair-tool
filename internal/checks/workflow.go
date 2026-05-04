@@ -8,6 +8,7 @@ import (
 	"kigrepair/internal/app"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/recommendations"
 	"kigrepair/internal/reports"
 )
 
@@ -39,16 +40,27 @@ func (w CheckWorkflow) Run(ctx *app.AppContext) error {
 		return err
 	}
 	ctx.Logger.Info("Wrote initial-detection.json")
+	recommendation := recommendations.Plan(recommendations.RecommendationInput{
+		Detection:     &report,
+		IsAdmin:       report.IsAdmin,
+		IsInteractive: !ctx.NonInteractive && !ctx.Quiet,
+		OutputDir:     ctx.OutputDir,
+	})
+	if err := ctx.Reporter.WriteJSON("recommendation-result", recommendation); err != nil {
+		return err
+	}
+	ctx.Logger.Info("Wrote recommendation-result.json")
 	ctx.ExitCode = exitCodeForHealth(report.Health)
 	ctx.JSONValue = CheckResult{
-		Command:   "check",
-		ReportDir: ctx.OutputDir,
-		ExitCode:  ctx.ExitCode,
-		Warnings:  report.Recommendations,
-		Errors:    report.Issues,
-		Detection: report,
+		Command:        "check",
+		ReportDir:      ctx.OutputDir,
+		ExitCode:       ctx.ExitCode,
+		Warnings:       report.Recommendations,
+		Errors:         report.Issues,
+		Detection:      report,
+		Recommendation: recommendation,
 	}
-	if err := ctx.Reporter.WriteText("summary", FormatSummary(report, ctx)); err != nil {
+	if err := ctx.Reporter.WriteText("summary", FormatSummary(report, ctx, recommendation)); err != nil {
 		return err
 	}
 	ctx.Logger.Info("Wrote summary.txt")
@@ -57,18 +69,19 @@ func (w CheckWorkflow) Run(ctx *app.AppContext) error {
 	}
 	ctx.Logger.Info("Wrote operations.json")
 	if !ctx.Quiet && !ctx.JSONOutput {
-		fmt.Print(FormatConsoleSummary(report, ctx))
+		fmt.Print(FormatConsoleSummary(report, ctx, recommendation))
 	}
 	return nil
 }
 
 type CheckResult struct {
-	Command   string                   `json:"command"`
-	ReportDir string                   `json:"report_dir"`
-	ExitCode  int                      `json:"exit_code"`
-	Warnings  []string                 `json:"warnings"`
-	Errors    []string                 `json:"errors"`
-	Detection detector.DetectionReport `json:"detection"`
+	Command        string                               `json:"command"`
+	ReportDir      string                               `json:"report_dir"`
+	ExitCode       int                                  `json:"exit_code"`
+	Warnings       []string                             `json:"warnings"`
+	Errors         []string                             `json:"errors"`
+	Detection      detector.DetectionReport             `json:"detection"`
+	Recommendation recommendations.RecommendationResult `json:"recommendation"`
 }
 
 func exitCodeForHealth(health detector.GrabberHealthStatus) int {
@@ -86,11 +99,11 @@ func exitCodeForHealth(health detector.GrabberHealthStatus) int {
 	}
 }
 
-func FormatConsoleSummary(report detector.DetectionReport, ctx *app.AppContext) string {
-	return FormatSummary(report, ctx)
+func FormatConsoleSummary(report detector.DetectionReport, ctx *app.AppContext, recommendation recommendations.RecommendationResult) string {
+	return FormatSummary(report, ctx, recommendation)
 }
 
-func FormatSummary(report detector.DetectionReport, ctx *app.AppContext) string {
+func FormatSummary(report detector.DetectionReport, ctx *app.AppContext, recommendation recommendations.RecommendationResult) string {
 	var b strings.Builder
 	b.WriteString("Kigrepair Check Summary\n\n")
 	b.WriteString("Health: " + string(report.Health) + "\n")
@@ -117,6 +130,8 @@ func FormatSummary(report detector.DetectionReport, ctx *app.AppContext) string 
 		}
 		b.WriteString("\n")
 	}
+	b.WriteString(recommendations.FormatConsole(recommendation))
+	b.WriteString("\n")
 	b.WriteString("Report:\n")
 	b.WriteString(ctx.OutputDir)
 	b.WriteString("\n")
@@ -134,7 +149,7 @@ func FormatSummary(report detector.DetectionReport, ctx *app.AppContext) string 
 		Warnings:       report.Recommendations,
 		Errors:         report.Issues,
 		Actions:        []string{"Detection completed with health: " + string(report.Health)},
-	}, b.String())
+	}, b.String()+recommendations.FormatSection(recommendation))
 }
 
 func valueOrDash(value string) string {

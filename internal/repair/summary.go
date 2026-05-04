@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"kigrepair/internal/detector"
+	"kigrepair/internal/recommendations"
 	"kigrepair/internal/reports"
 	"kigrepair/internal/verifier"
 )
@@ -74,8 +75,15 @@ func FormatSummary(result RepairResult, final *detector.DetectionReport) string 
 	}
 	b.WriteString(fmt.Sprintf("Exit code: %d\n\n", result.ExitCode))
 	if result.Verification != nil {
-		b.WriteString(verifier.FormatSummary(*result.Verification))
+		verificationRecommendation := recommendations.RecommendationResult{}
+		if result.Recommendation != nil {
+			verificationRecommendation = *result.Recommendation
+		}
+		b.WriteString(verifier.FormatSummary(*result.Verification, verificationRecommendation))
 		b.WriteString("\n")
+	}
+	if result.Verification == nil && result.Recommendation != nil {
+		b.WriteString(recommendations.FormatSection(*result.Recommendation))
 	}
 	if len(result.Warnings) > 0 {
 		b.WriteString("Warnings:\n")
