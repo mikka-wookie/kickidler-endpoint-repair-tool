@@ -113,6 +113,13 @@ Version:
 
 ```powershell
 .\kigrepair.exe version
+.\kigrepair.exe version --json
+```
+
+Support release packages are expected to contain `kigrepair.exe` and may also contain `grabber.msi`. When the MSI is included in the same folder, support engineers can run:
+
+```powershell
+.\kigrepair.exe repair --invite <INVITE> --installer .\grabber.msi
 ```
 
 ## JSON And Quiet Behavior
@@ -207,6 +214,35 @@ go mod tidy
 go test ./...
 go build -o kigrepair.exe ./cmd/kigrepair
 ```
+
+## Building a release
+
+Run the release build from PowerShell:
+
+```powershell
+.\scripts\build.ps1 -Version 0.1.0
+```
+
+The script runs `gofmt`, `go mod tidy`, `go test ./...`, and a Windows amd64 build with embedded version metadata. Use `-SkipTests` only when you intentionally want a faster local package build:
+
+```powershell
+.\scripts\build.ps1 -Version 0.1.0 -SkipTests
+```
+
+Release output is written to:
+
+```text
+dist\kigrepair-v0.1.0-windows-amd64\
+```
+
+The package folder contains `kigrepair.exe`, `README.md`, `RELEASE_NOTES.md`, `checksums.txt`, and `kigrepair-v0.1.0-windows-amd64.zip`. If `grabber.msi` exists at `.\grabber.msi` or `.\assets\grabber.msi`, the script copies it into the release folder. If the MSI is missing, the build continues and packages the tool only.
+
+`checksums.txt` contains SHA256 hashes for packaged files. The ZIP is created with PowerShell `Compress-Archive`; no external archive tool is required.
+
+## Code signing
+
+Code signing is not currently automated.
+Future release process may sign `kigrepair.exe` before checksums and ZIP creation.
 
 Manual non-destructive smoke checks:
 

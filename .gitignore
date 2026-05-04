@@ -10,7 +10,6 @@ dist/
 /Reports/
 *.log
 .docs/
-AGENTS.md
 
 # VS Code
 .vscode/*
@@ -27,3 +26,4 @@ $RECYCLE.BIN/
 *.tmp
 *.bak
 *.swp
+*.zip
