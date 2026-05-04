@@ -181,6 +181,8 @@ func bundleSpecs() []bundleSpec {
 		"defender-result.json",
 		"repair-result.json",
 		"verification-result.json",
+		"preflight-result.json",
+		"classification-result.json",
 		"recommendation-result.json",
 		"collect-result.json",
 	}
