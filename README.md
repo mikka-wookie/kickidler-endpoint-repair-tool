@@ -25,6 +25,7 @@ Global flags:
 - `--non-interactive` - disable prompts.
 - `--force` - allow repair to reinstall even when the detected state is healthy.
 - `--json` - print one JSON object to stdout.
+- `--no-elevate` - return an administrator-required error instead of relaunching through UAC.
 
 ## Reports
 
@@ -129,6 +130,25 @@ For commands that support `--json`, stdout contains exactly one JSON object. Hum
 - `defender --ensure` requires `--yes`
 
 `install` does not require `--yes` when a valid invite and installer are provided. All system-changing workflows still require administrator rights.
+
+## Administrator Elevation
+
+Admin-required commands can relaunch themselves through the standard Windows UAC prompt when started from a non-elevated interactive PowerShell:
+
+- `cleanup` real mode
+- `install`
+- `defender --ensure`
+- `repair`
+
+Read-only commands do not request UAC: `check`, `cleanup --dry-run`, `defender` without `--ensure`, `collect-report`, and `version`.
+
+Use `--no-elevate` to disable the UAC relaunch and return exit code `2` instead:
+
+```powershell
+.\kigrepair.exe repair --invite <INVITE> --installer .\grabber.msi --no-elevate
+```
+
+Quiet or non-interactive automation does not auto-prompt UAC. Run those commands from an elevated PowerShell, or omit `--non-interactive` when a support engineer is present to approve the UAC prompt.
 
 ## Exit Codes
 

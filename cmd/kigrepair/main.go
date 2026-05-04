@@ -19,6 +19,7 @@ import (
 	"kigrepair/internal/logging"
 	"kigrepair/internal/repair"
 	"kigrepair/internal/reports"
+	"kigrepair/internal/winapi"
 )
 
 type globalOptions struct {
@@ -27,6 +28,8 @@ type globalOptions struct {
 	nonInteractive bool
 	force          bool
 	jsonOutput     bool
+	noElevate      bool
+	elevatedChild  bool
 }
 
 func main() {
@@ -43,6 +46,9 @@ func main() {
 	rootCmd.PersistentFlags().BoolVar(&opts.nonInteractive, "non-interactive", false, "disable interactive prompts")
 	rootCmd.PersistentFlags().BoolVar(&opts.force, "force", false, "allow future privileged workflows to bypass confirmations")
 	rootCmd.PersistentFlags().BoolVar(&opts.jsonOutput, "json", false, "print command results as JSON")
+	rootCmd.PersistentFlags().BoolVar(&opts.noElevate, "no-elevate", false, "do not relaunch through UAC when administrator rights are required")
+	rootCmd.PersistentFlags().BoolVar(&opts.elevatedChild, "elevated-child", false, "internal flag used after UAC relaunch")
+	_ = rootCmd.PersistentFlags().MarkHidden("elevated-child")
 
 	rootCmd.AddCommand(workflowCommand("check", "Detect Kickidler Grabber installation state", opts, checks.CheckWorkflow{}))
 	rootCmd.AddCommand(repairCommand(opts))
@@ -70,7 +76,7 @@ func repairCommand(opts *globalOptions) *cobra.Command {
 		Use:   "repair",
 		Short: "Repair Grabber by cleaning broken state, installing MSI, and ensuring Defender exclusions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, repair.RepairWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
+			return runWorkflowWithAdmin(cmd, opts, "repair", true, repair.RepairWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
 		},
 	}
 	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
@@ -86,7 +92,7 @@ func cleanupCommand(opts *globalOptions) *cobra.Command {
 		Use:   "cleanup",
 		Short: "Clean up Grabber services, processes, files, and registry leftovers",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, cleaner.CleanupWorkflow{DryRun: dryRun, Yes: yes})
+			return runWorkflowWithAdmin(cmd, opts, "cleanup", !dryRun, cleaner.CleanupWorkflow{DryRun: dryRun, Yes: yes})
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview cleanup actions without modifying the system")
@@ -102,7 +108,7 @@ func installCommand(opts *globalOptions) *cobra.Command {
 		Use:   "install",
 		Short: "Install Grabber from an MSI package",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, installer.InstallWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
+			return runWorkflowWithAdmin(cmd, opts, "install", true, installer.InstallWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
 		},
 	}
 	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
@@ -119,7 +125,7 @@ func defenderCommand(opts *globalOptions) *cobra.Command {
 		Use:   "defender",
 		Short: "Inspect or ensure Windows Defender exclusions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, defender.DefenderWorkflow{Ensure: ensure, Yes: yes, AllKnownPaths: allKnownPaths})
+			return runWorkflowWithAdmin(cmd, opts, "defender --ensure", ensure, defender.DefenderWorkflow{Ensure: ensure, Yes: yes, AllKnownPaths: allKnownPaths})
 		},
 	}
 	cmd.Flags().BoolVar(&ensure, "ensure", false, "add missing Defender exclusions")
@@ -157,9 +163,49 @@ func workflowCommand(use string, short string, opts *globalOptions, workflow app
 		Use:   use,
 		Short: short,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, workflow)
+			return runWorkflowWithAdmin(cmd, opts, use, false, workflow)
 		},
 	}
+}
+
+type adminCheckerFunc func() bool
+
+func (f adminCheckerFunc) IsAdmin() bool {
+	return f()
+}
+
+type elevationLauncherFunc func([]string) error
+
+func (f elevationLauncherFunc) RelaunchElevated(args []string) error {
+	return f(args)
+}
+
+func runWorkflowWithAdmin(cmd *cobra.Command, opts *globalOptions, commandName string, requiresAdmin bool, workflow app.Workflow) error {
+	if requiresAdmin && !opts.quiet && !opts.nonInteractive && !opts.noElevate && !opts.elevatedChild && !winapi.IsAdmin() {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Administrator rights are required for this command.")
+		fmt.Fprintln(cmd.ErrOrStderr(), "Requesting elevation through Windows UAC...")
+	}
+	result := app.EnsureAdminOrRelaunch(app.AdminGuardOptions{
+		CommandName:    commandName,
+		RequiresAdmin:  requiresAdmin,
+		NoElevate:      opts.noElevate,
+		Quiet:          opts.quiet,
+		NonInteractive: opts.nonInteractive,
+		ElevatedChild:  opts.elevatedChild,
+		Args:           os.Args[1:],
+		AdminChecker:   adminCheckerFunc(winapi.IsAdmin),
+		Launcher:       elevationLauncherFunc(winapi.RelaunchElevated),
+	})
+	if result.Relaunched {
+		return nil
+	}
+	if result.Err != nil {
+		if result.Message != "" && !opts.quiet {
+			fmt.Fprintln(cmd.ErrOrStderr(), result.Message)
+		}
+		return app.ExitError{Code: result.ExitCode}
+	}
+	return runWorkflow(opts, workflow)
 }
 
 func versionCommand() *cobra.Command {
