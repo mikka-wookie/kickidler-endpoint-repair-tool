@@ -35,12 +35,15 @@ func (w CollectReportWorkflow) Name() string {
 func (w CollectReportWorkflow) Run(ctx *app.AppContext) error {
 	startedAt := time.Now()
 	result := CollectReportResult{
-		StartedAt:  startedAt,
-		Mode:       string(ctx.Mode),
-		ReportDir:  ctx.OutputDir,
-		Collectors: []CollectorResult{},
-		Warnings:   []string{},
-		Errors:     []string{},
+		StartedAt:        startedAt,
+		Mode:             string(ctx.Mode),
+		ReportDir:        ctx.OutputDir,
+		Collectors:       []CollectorResult{},
+		FilesIncluded:    []CollectedFile{},
+		FilesSkipped:     []string{},
+		Warnings:         []string{},
+		Errors:           []string{},
+		RedactionEnabled: true,
 	}
 	ctx.JSONValue = result
 	ctx.Logger.Info("collect-report started")
@@ -96,31 +99,30 @@ func (w CollectReportWorkflow) Run(ctx *app.AppContext) error {
 	ctx.Logger.Info("Wrote summary.txt")
 
 	if !w.NoZip {
-		ctx.Logger.Info("collector start: zip")
-		archive, err := reports.CreateSupportBundle(ctx.OutputDir)
+		ctx.Logger.Info("collector inspect: zip")
+		archive := reports.InspectSupportBundle(ctx.OutputDir)
 		status := app.OperationStatusSuccess
 		message := "Support bundle created"
 		errorText := ""
-		if err != nil {
+		result.BundlePath = archive.Path
+		result.Warnings = append(result.Warnings, archive.Warnings...)
+		result.Errors = append(result.Errors, archive.Errors...)
+		result.FilesSkipped = append(result.FilesSkipped, archive.Skipped...)
+		result.FilesIncluded = collectedFiles(archive.Included)
+		if len(archive.Warnings) > 0 {
 			status = app.OperationStatusWarning
-			message = "Support bundle creation failed"
-			errorText = err.Error()
-			result.BundlePath = ""
-			result.Warnings = append(result.Warnings, errorText)
-		} else {
-			result.BundlePath = archive.Path
-			result.Warnings = append(result.Warnings, archive.Warnings...)
-			if len(archive.Warnings) > 0 {
-				status = app.OperationStatusWarning
-				message = "Support bundle created with warnings"
-				errorText = strings.Join(archive.Warnings, "; ")
-			}
-			ctx.Logger.Info("ZIP path: %s", archive.Path)
+			message = "Support bundle created with warnings"
+			errorText = strings.Join(archive.Warnings, "; ")
+		}
+		if len(archive.Errors) > 0 {
+			status = app.OperationStatusFailed
+			message = "Support bundle created with errors"
+			errorText = strings.Join(archive.Errors, "; ")
 		}
 		zipOperation := operation("collect.zip", "zip", status, message, errorText)
 		ctx.AddResult(zipOperation)
 		logging.LogOperation(ctx.Logger, zipOperation)
-		ctx.Logger.Info("collector end: zip status=%s", status)
+		ctx.Logger.Info("collector inspect end: zip status=%s", status)
 	} else {
 		zipOperation := operation("collect.zip", "zip", app.OperationStatusSkipped, "ZIP creation skipped by --no-zip", "")
 		ctx.AddResult(zipOperation)
@@ -128,6 +130,7 @@ func (w CollectReportWorkflow) Run(ctx *app.AppContext) error {
 	}
 
 	result.Collectors = collectorResults(ctx.Results)
+	result.Status = collectStatus(result)
 	ctx.ExitCode = exitCode(result)
 	result.ExitCode = ctx.ExitCode
 	result.FinishedAt = time.Now()
@@ -145,12 +148,67 @@ func (w CollectReportWorkflow) Run(ctx *app.AppContext) error {
 		return err
 	}
 	ctx.Logger.Info("Wrote operations.json")
+
+	if !w.NoZip {
+		ctx.Logger.Info("collector start: zip")
+		archive, err := reports.CreateSupportBundle(ctx.OutputDir)
+		if err != nil {
+			errorText := err.Error()
+			result.BundlePath = ""
+			result.Warnings = append(result.Warnings, errorText)
+			result.Status = collectStatus(result)
+			ctx.ExitCode = exitCode(result)
+			result.ExitCode = ctx.ExitCode
+			ctx.JSONValue = result
+			if writeErr := ctx.Reporter.WriteJSON("collect-result", result); writeErr != nil {
+				return writeErr
+			}
+			if writeErr := ctx.Reporter.WriteText("summary", FormatCollectSummary(result)); writeErr != nil {
+				return writeErr
+			}
+			ctx.Logger.Warn("support bundle creation failed: %s", errorText)
+		} else {
+			ctx.Logger.Info("ZIP path: %s", archive.Path)
+		}
+		ctx.Logger.Info("collector end: zip")
+	}
 	ctx.Logger.Info("final exit code: %d", ctx.ExitCode)
 
 	if !ctx.Quiet && !ctx.JSONOutput {
 		fmt.Print(FormatCollectSummary(result))
 	}
 	return nil
+}
+
+func collectedFiles(files []reports.BundleFile) []CollectedFile {
+	result := make([]CollectedFile, 0, len(files))
+	for _, file := range files {
+		result = append(result, CollectedFile{
+			Path:      file.Path,
+			Source:    file.Source,
+			SizeBytes: file.SizeBytes,
+			SHA256:    file.SHA256,
+		})
+	}
+	return result
+}
+
+func collectStatus(result CollectReportResult) string {
+	if len(result.Errors) > 0 {
+		return "failed"
+	}
+	if len(result.Warnings) > 0 {
+		return "warning"
+	}
+	for _, collector := range result.Collectors {
+		if collector.Status == string(app.OperationStatusFailed) {
+			return "failed"
+		}
+		if collector.Status == string(app.OperationStatusWarning) {
+			return "warning"
+		}
+	}
+	return "success"
 }
 
 func (w CollectReportWorkflow) collectors(detection detector.DetectionReport) []Collector {
@@ -248,17 +306,17 @@ func collectorResults(results []app.OperationResult) []CollectorResult {
 func outputFilesFromResult(name string, result app.OperationResult) []string {
 	switch name {
 	case "detection":
-		return []string{"detection.json"}
+		return []string{"initial-detection.json"}
 	case "system":
-		return []string{"system.json"}
+		return []string{filepath.ToSlash(filepath.Join("system", "environment.json"))}
 	case "services":
-		return []string{"services.json"}
+		return []string{filepath.ToSlash(filepath.Join("system", "services.json"))}
 	case "processes":
-		return []string{"processes.json"}
+		return []string{filepath.ToSlash(filepath.Join("system", "processes.json"))}
 	case "defender":
-		return []string{"defender.json"}
+		return []string{filepath.ToSlash(filepath.Join("system", "defender.json"))}
 	case "registry":
-		return []string{"registry.json"}
+		return []string{filepath.ToSlash(filepath.Join("system", "registry.json"))}
 	case "eventlogs":
 		if result.Status == app.OperationStatusSuccess || result.Status == app.OperationStatusWarning {
 			return []string{filepath.ToSlash(filepath.Join("eventlogs", "README.txt"))}

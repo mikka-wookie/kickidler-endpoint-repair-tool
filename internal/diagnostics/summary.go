@@ -11,6 +11,7 @@ import (
 func FormatCollectSummary(result CollectReportResult) string {
 	var b strings.Builder
 	b.WriteString("Kigrepair Collect Report\n\n")
+	b.WriteString("Status: " + valueOrDash(result.Status) + "\n")
 	b.WriteString("Health: " + valueOrDash(result.Health) + "\n")
 	b.WriteString("Install mode: " + valueOrDash(result.InstallMode) + "\n")
 	b.WriteString("Install root: " + valueOrDash(result.InstallRoot) + "\n\n")
@@ -24,6 +25,10 @@ func FormatCollectSummary(result CollectReportResult) string {
 		b.WriteString(result.BundlePath)
 		b.WriteString("\n\n")
 	}
+	b.WriteString(fmt.Sprintf("Files included: %d\n", len(result.FilesIncluded)))
+	b.WriteString(fmt.Sprintf("Warnings: %d\n", len(uniqueStrings(result.Warnings))))
+	b.WriteString(fmt.Sprintf("Errors: %d\n", len(uniqueStrings(result.Errors))))
+	b.WriteString(fmt.Sprintf("Redaction enabled: %t\n\n", result.RedactionEnabled))
 	if len(result.Warnings) > 0 {
 		b.WriteString("Warnings:\n")
 		for _, warning := range uniqueStrings(result.Warnings) {

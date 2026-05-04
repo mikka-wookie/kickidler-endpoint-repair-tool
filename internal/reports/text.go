@@ -1,7 +1,15 @@
 package reports
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+
+	"kigrepair/internal/safety"
+)
 
 func WriteText(path string, content string) error {
-	return os.WriteFile(path, []byte(content), 0644)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(safety.RedactString(content)), 0644)
 }

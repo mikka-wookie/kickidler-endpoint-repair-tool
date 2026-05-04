@@ -2,10 +2,12 @@ package diagnostics
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
 	"kigrepair/internal/app"
+	"kigrepair/internal/config"
 	"kigrepair/internal/detector"
 )
 
@@ -24,6 +26,7 @@ type SystemInfo struct {
 	Temp             string    `json:"temp,omitempty"`
 	WorkingDirectory string    `json:"working_directory,omitempty"`
 	ExecutablePath   string    `json:"executable_path,omitempty"`
+	ToolVersion      string    `json:"tool_version,omitempty"`
 }
 
 type SystemInfoCollector struct {
@@ -52,6 +55,11 @@ func (c SystemInfoCollector) Collect(ctx *app.AppContext) app.OperationResult {
 		Temp:             os.Getenv("TEMP"),
 		WorkingDirectory: wd,
 		ExecutablePath:   exe,
+		ToolVersion:      config.Version,
 	}
-	return writeJSON(ctx, "system", info)
+	if err := ctx.Reporter.WriteJSON("system/environment", info); err != nil {
+		return operation("collect.system", "system/environment.json", app.OperationStatusFailed, "Failed to write system/environment.json", err.Error())
+	}
+	ctx.Logger.Info("output file created: %s", filepath.Join(ctx.OutputDir, "system", "environment.json"))
+	return operation("collect.system", "system/environment.json", app.OperationStatusSuccess, "Wrote system/environment.json", "")
 }

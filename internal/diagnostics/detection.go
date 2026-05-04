@@ -1,6 +1,8 @@
 package diagnostics
 
 import (
+	"path/filepath"
+
 	"kigrepair/internal/app"
 	"kigrepair/internal/detector"
 )
@@ -14,5 +16,9 @@ func (DetectionCollector) Name() string {
 }
 
 func (c DetectionCollector) Collect(ctx *app.AppContext) app.OperationResult {
-	return writeJSON(ctx, "detection", c.Report)
+	if err := ctx.Reporter.WriteJSON("initial-detection", c.Report); err != nil {
+		return operation("collect.detection", "initial-detection.json", app.OperationStatusFailed, "Failed to write initial-detection.json", err.Error())
+	}
+	ctx.Logger.Info("output file created: %s", filepath.Join(ctx.OutputDir, "initial-detection.json"))
+	return operation("collect.detection", "initial-detection.json", app.OperationStatusSuccess, "Wrote initial-detection.json", "")
 }
