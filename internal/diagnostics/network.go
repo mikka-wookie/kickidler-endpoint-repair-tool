@@ -9,5 +9,5 @@ func (NetworkCollector) Name() string {
 }
 
 func (NetworkCollector) Collect(ctx *app.AppContext) app.OperationResult {
-	return placeholderResult("collect.network", "network")
+	return operation("collect.network", "network", app.OperationStatusSkipped, "Network collection is not implemented", "")
 }

@@ -5,6 +5,8 @@ import (
 	"io"
 	"log"
 	"os"
+
+	"kigrepair/internal/safety"
 )
 
 type Logger struct {
@@ -45,7 +47,7 @@ func (l *Logger) Close() error {
 }
 
 func (l *Logger) write(level string, format string, args ...any) {
-	message := fmt.Sprintf(format, args...)
+	message := safety.RedactString(fmt.Sprintf(format, args...))
 	l.log.Printf("[%s] %s", level, message)
 	if !l.quiet {
 		fmt.Fprintf(os.Stdout, "[%s] %s\n", level, message)

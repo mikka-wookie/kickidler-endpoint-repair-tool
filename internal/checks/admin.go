@@ -1,5 +1,7 @@
 package checks
 
-func IsAdmin() (bool, error) {
-	return false, nil
+import "kigrepair/internal/winapi"
+
+func IsAdmin() bool {
+	return winapi.IsAdmin()
 }

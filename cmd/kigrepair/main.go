@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -18,6 +19,8 @@ import (
 	"kigrepair/internal/logging"
 	"kigrepair/internal/repair"
 	"kigrepair/internal/reports"
+	"kigrepair/internal/verifier"
+	"kigrepair/internal/winapi"
 )
 
 type globalOptions struct {
@@ -26,13 +29,17 @@ type globalOptions struct {
 	nonInteractive bool
 	force          bool
 	jsonOutput     bool
+	noElevate      bool
+	elevatedChild  bool
 }
 
 func main() {
 	opts := &globalOptions{}
 	rootCmd := &cobra.Command{
-		Use:   "kigrepair",
-		Short: "Kickidler support and repair utility",
+		Use:           "kigrepair",
+		Short:         "Kickidler support and repair utility",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
 	rootCmd.PersistentFlags().StringVar(&opts.output, "output", "", "report output directory or report root")
@@ -40,62 +47,127 @@ func main() {
 	rootCmd.PersistentFlags().BoolVar(&opts.nonInteractive, "non-interactive", false, "disable interactive prompts")
 	rootCmd.PersistentFlags().BoolVar(&opts.force, "force", false, "allow future privileged workflows to bypass confirmations")
 	rootCmd.PersistentFlags().BoolVar(&opts.jsonOutput, "json", false, "print command results as JSON")
+	rootCmd.PersistentFlags().BoolVar(&opts.noElevate, "no-elevate", false, "do not relaunch through UAC when administrator rights are required")
+	rootCmd.PersistentFlags().BoolVar(&opts.elevatedChild, "elevated-child", false, "internal flag used after UAC relaunch")
+	_ = rootCmd.PersistentFlags().MarkHidden("elevated-child")
 
-	rootCmd.AddCommand(workflowCommand("check", "Run placeholder checks", opts, checks.CheckWorkflow{}))
+	rootCmd.AddCommand(workflowCommand("check", "Detect Kickidler Grabber installation state", opts, checks.CheckWorkflow{}))
 	rootCmd.AddCommand(repairCommand(opts))
-	rootCmd.AddCommand(workflowCommand("cleanup", "Plan placeholder cleanup", opts, cleaner.CleanupWorkflow{}))
+	rootCmd.AddCommand(cleanupCommand(opts))
 	rootCmd.AddCommand(installCommand(opts))
 	rootCmd.AddCommand(defenderCommand(opts))
-	rootCmd.AddCommand(workflowCommand("collect-report", "Collect placeholder diagnostics report", opts, diagnostics.CollectReportWorkflow{}))
-	rootCmd.AddCommand(versionCommand())
+	rootCmd.AddCommand(collectReportCommand(opts))
+	rootCmd.AddCommand(verifyCommand(opts))
+	rootCmd.AddCommand(versionCommand(opts))
 
 	if err := rootCmd.Execute(); err != nil {
+		var exitErr app.ExitError
+		if errors.As(err, &exitErr) {
+			os.Exit(exitErr.Code)
+		}
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(app.ExitUnexpectedError)
 	}
 }
 
 func repairCommand(opts *globalOptions) *cobra.Command {
 	var invite string
 	var installerPath string
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   "repair",
-		Short: "Run placeholder Grabber repair workflow",
+		Short: "Repair Grabber by cleaning broken state, installing MSI, and ensuring Defender exclusions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, repair.RepairWorkflow{Invite: invite, Installer: installerPath})
+			return runWorkflowWithAdmin(cmd, opts, "repair", true, repair.RepairWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
 		},
 	}
 	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
 	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm repair without prompting")
+	return cmd
+}
+
+func cleanupCommand(opts *globalOptions) *cobra.Command {
+	var dryRun bool
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "cleanup",
+		Short: "Clean up Grabber services, processes, files, and registry leftovers",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowWithAdmin(cmd, opts, "cleanup", !dryRun, cleaner.CleanupWorkflow{DryRun: dryRun, Yes: yes})
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview cleanup actions without modifying the system")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm real cleanup without prompting")
 	return cmd
 }
 
 func installCommand(opts *globalOptions) *cobra.Command {
 	var invite string
 	var installerPath string
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Run placeholder Grabber install workflow",
+		Short: "Install Grabber from an MSI package",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, installer.InstallWorkflow{Invite: invite, Installer: installerPath})
+			return runWorkflowWithAdmin(cmd, opts, "install", true, installer.InstallWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
 		},
 	}
 	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
 	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm install without prompting")
 	return cmd
 }
 
 func defenderCommand(opts *globalOptions) *cobra.Command {
 	var ensure bool
+	var yes bool
+	var allKnownPaths bool
 	cmd := &cobra.Command{
 		Use:   "defender",
-		Short: "Inspect placeholder Defender configuration",
+		Short: "Inspect or ensure Windows Defender exclusions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, defender.DefenderWorkflow{Ensure: ensure})
+			return runWorkflowWithAdmin(cmd, opts, "defender --ensure", ensure, defender.DefenderWorkflow{Ensure: ensure, Yes: yes, AllKnownPaths: allKnownPaths})
 		},
 	}
-	cmd.Flags().BoolVar(&ensure, "ensure", false, "placeholder flag for future Defender exclusion enforcement")
+	cmd.Flags().BoolVar(&ensure, "ensure", false, "add missing Defender exclusions")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm Defender exclusion changes without prompting")
+	cmd.Flags().BoolVar(&allKnownPaths, "all-known-paths", false, "with --ensure, add all configured Defender exclusion paths")
 	return cmd
+}
+
+func collectReportCommand(opts *globalOptions) *cobra.Command {
+	var includeEventLogs bool
+	var includeHistory bool
+	var historyLimit int
+	var noZip bool
+	cmd := &cobra.Command{
+		Use:   "collect-report",
+		Short: "Collect read-only diagnostics and create a support bundle",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflow(opts, diagnostics.CollectReportWorkflow{
+				IncludeEventLogs: includeEventLogs,
+				IncludeHistory:   includeHistory,
+				HistoryLimit:     historyLimit,
+				NoZip:            noZip,
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&includeEventLogs, "include-eventlogs", true, "include limited Windows Event Log diagnostics")
+	cmd.Flags().BoolVar(&includeHistory, "include-history", true, "include recent kigrepair report artifacts")
+	cmd.Flags().IntVar(&historyLimit, "history-limit", 5, "number of previous report folders to include")
+	cmd.Flags().BoolVar(&noZip, "no-zip", false, "skip creating kigrepair-support-bundle.zip")
+	return cmd
+}
+
+func verifyCommand(opts *globalOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "verify",
+		Short: "Verifies current Grabber installation state without modifying the system",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowWithAdmin(cmd, opts, "verify", false, verifier.VerifyWorkflow{})
+		},
+	}
 }
 
 func workflowCommand(use string, short string, opts *globalOptions, workflow app.Workflow) *cobra.Command {
@@ -103,17 +175,86 @@ func workflowCommand(use string, short string, opts *globalOptions, workflow app
 		Use:   use,
 		Short: short,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, workflow)
+			return runWorkflowWithAdmin(cmd, opts, use, false, workflow)
 		},
 	}
 }
 
-func versionCommand() *cobra.Command {
+type adminCheckerFunc func() bool
+
+func (f adminCheckerFunc) IsAdmin() bool {
+	return f()
+}
+
+type elevationLauncherFunc func([]string) error
+
+func (f elevationLauncherFunc) RelaunchElevated(args []string) error {
+	return f(args)
+}
+
+func runWorkflowWithAdmin(cmd *cobra.Command, opts *globalOptions, commandName string, requiresAdmin bool, workflow app.Workflow) error {
+	if requiresAdmin && !opts.quiet && !opts.nonInteractive && !opts.noElevate && !opts.elevatedChild && !winapi.IsAdmin() {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Administrator rights are required for this command.")
+		fmt.Fprintln(cmd.ErrOrStderr(), "Requesting elevation through Windows UAC...")
+	}
+	result := app.EnsureAdminOrRelaunch(app.AdminGuardOptions{
+		CommandName:    commandName,
+		RequiresAdmin:  requiresAdmin,
+		NoElevate:      opts.noElevate,
+		Quiet:          opts.quiet,
+		NonInteractive: opts.nonInteractive,
+		ElevatedChild:  opts.elevatedChild,
+		Args:           os.Args[1:],
+		AdminChecker:   adminCheckerFunc(winapi.IsAdmin),
+		Launcher:       elevationLauncherFunc(winapi.RelaunchElevated),
+	})
+	if result.Relaunched {
+		return nil
+	}
+	if result.Err != nil {
+		if result.Message != "" && !opts.quiet {
+			fmt.Fprintln(cmd.ErrOrStderr(), result.Message)
+		}
+		return app.ExitError{Code: result.ExitCode}
+	}
+	return runWorkflow(opts, workflow)
+}
+
+type versionInfo struct {
+	AppName   string `json:"app_name"`
+	Version   string `json:"version"`
+	GitCommit string `json:"git_commit"`
+	BuildDate string `json:"build_date"`
+	GOOS      string `json:"goos"`
+	GOARCH    string `json:"goarch"`
+}
+
+func versionCommand(opts *globalOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print version",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("%s %s\n", config.BinaryName, config.Version)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			info := versionInfo{
+				AppName:   config.AppName,
+				Version:   config.Version,
+				GitCommit: config.GitCommit,
+				BuildDate: config.BuildDate,
+				GOOS:      config.TargetOS,
+				GOARCH:    config.TargetArch,
+			}
+			if opts.jsonOutput {
+				encoded, err := json.MarshalIndent(info, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), string(encoded))
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", info.AppName, info.Version)
+			fmt.Fprintf(cmd.OutOrStdout(), "Commit: %s\n", info.GitCommit)
+			fmt.Fprintf(cmd.OutOrStdout(), "Build date: %s\n", info.BuildDate)
+			fmt.Fprintf(cmd.OutOrStdout(), "Target: %s/%s\n", info.GOOS, info.GOARCH)
+			return nil
 		},
 	}
 }
@@ -141,7 +282,7 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	}
 	ctx.Reporter = reporter
 
-	logger, err := logging.New(reports.LogPath(ctx.OutputDir), ctx.Quiet)
+	logger, err := logging.New(reports.LogPath(ctx.OutputDir), ctx.Quiet || ctx.JSONOutput || workflow.Name() == "verify")
 	if err != nil {
 		return err
 	}
@@ -153,13 +294,20 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	}
 
 	if ctx.JSONOutput {
-		encoded, err := json.MarshalIndent(ctx.Results, "", "  ")
+		value := any(ctx.Results)
+		if ctx.JSONValue != nil {
+			value = ctx.JSONValue
+		}
+		encoded, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
 			return err
 		}
 		fmt.Println(string(encoded))
-	} else if !ctx.Quiet {
+	} else if !ctx.Quiet && workflow.Name() != "verify" {
 		fmt.Printf("Report directory: %s\n", ctx.OutputDir)
+	}
+	if ctx.ExitCode != 0 {
+		return app.ExitError{Code: ctx.ExitCode}
 	}
 	return nil
 }

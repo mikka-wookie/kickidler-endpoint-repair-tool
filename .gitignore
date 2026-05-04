@@ -7,8 +7,9 @@ bin/
 dist/
 
 # Local reports and logs
-Reports/
+/Reports/
 *.log
+.docs/
 
 # VS Code
 .vscode/*
@@ -25,3 +26,4 @@ $RECYCLE.BIN/
 *.tmp
 *.bak
 *.swp
+*.zip
