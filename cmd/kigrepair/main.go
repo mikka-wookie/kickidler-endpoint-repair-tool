@@ -65,15 +65,17 @@ func main() {
 func repairCommand(opts *globalOptions) *cobra.Command {
 	var invite string
 	var installerPath string
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   "repair",
-		Short: "Run placeholder Grabber repair workflow",
+		Short: "Repair Grabber by cleaning broken state, installing MSI, and ensuring Defender exclusions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflow(opts, repair.RepairWorkflow{Invite: invite, Installer: installerPath})
+			return runWorkflow(opts, repair.RepairWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
 		},
 	}
 	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
 	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
+	cmd.Flags().BoolVar(&yes, "yes", false, "confirm repair without prompting")
 	return cmd
 }
 
