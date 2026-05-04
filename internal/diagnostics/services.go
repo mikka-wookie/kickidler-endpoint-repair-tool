@@ -1,13 +1,18 @@
 package diagnostics
 
-import "kigrepair/internal/app"
+import (
+	"kigrepair/internal/app"
+	"kigrepair/internal/detector"
+)
 
-type ServicesCollector struct{}
+type ServicesCollector struct {
+	Report detector.DetectionReport
+}
 
 func (ServicesCollector) Name() string {
 	return "services"
 }
 
-func (ServicesCollector) Collect(ctx *app.AppContext) app.OperationResult {
-	return placeholderResult("collect.services", "services")
+func (c ServicesCollector) Collect(ctx *app.AppContext) app.OperationResult {
+	return writeJSON(ctx, "services", c.Report.Services)
 }

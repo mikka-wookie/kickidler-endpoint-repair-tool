@@ -7,7 +7,7 @@ bin/
 dist/
 
 # Local reports and logs
-Reports/
+/Reports/
 *.log
 .docs/
 AGENTS.md

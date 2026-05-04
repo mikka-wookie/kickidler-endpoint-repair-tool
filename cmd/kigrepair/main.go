@@ -49,7 +49,7 @@ func main() {
 	rootCmd.AddCommand(cleanupCommand(opts))
 	rootCmd.AddCommand(installCommand(opts))
 	rootCmd.AddCommand(defenderCommand(opts))
-	rootCmd.AddCommand(workflowCommand("collect-report", "Collect placeholder diagnostics report", opts, diagnostics.CollectReportWorkflow{}))
+	rootCmd.AddCommand(collectReportCommand(opts))
 	rootCmd.AddCommand(versionCommand())
 
 	if err := rootCmd.Execute(); err != nil {
@@ -125,6 +125,30 @@ func defenderCommand(opts *globalOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&ensure, "ensure", false, "add missing Defender exclusions")
 	cmd.Flags().BoolVar(&yes, "yes", false, "confirm Defender exclusion changes without prompting")
 	cmd.Flags().BoolVar(&allKnownPaths, "all-known-paths", false, "with --ensure, add all configured Defender exclusion paths")
+	return cmd
+}
+
+func collectReportCommand(opts *globalOptions) *cobra.Command {
+	var includeEventLogs bool
+	var includeHistory bool
+	var historyLimit int
+	var noZip bool
+	cmd := &cobra.Command{
+		Use:   "collect-report",
+		Short: "Collect read-only diagnostics and create a support bundle",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflow(opts, diagnostics.CollectReportWorkflow{
+				IncludeEventLogs: includeEventLogs,
+				IncludeHistory:   includeHistory,
+				HistoryLimit:     historyLimit,
+				NoZip:            noZip,
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&includeEventLogs, "include-eventlogs", true, "include limited Windows Event Log diagnostics")
+	cmd.Flags().BoolVar(&includeHistory, "include-history", true, "include recent kigrepair report artifacts")
+	cmd.Flags().IntVar(&historyLimit, "history-limit", 5, "number of previous report folders to include")
+	cmd.Flags().BoolVar(&noZip, "no-zip", false, "skip creating kigrepair-support-bundle.zip")
 	return cmd
 }
 
