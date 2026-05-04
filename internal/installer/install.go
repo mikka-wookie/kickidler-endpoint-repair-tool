@@ -31,6 +31,7 @@ func (w InstallWorkflow) Run(ctx *app.AppContext) error {
 	startedAt := time.Now()
 	result := InstallResult{
 		StartedAt:      startedAt,
+		Mode:           string(ctx.Mode),
 		InviteProvided: strings.TrimSpace(w.Invite) != "",
 		MSI:            MSIResult{ExitCode: -1, Status: "not_run", Message: "MSI install was not run"},
 		ReportDir:      ctx.OutputDir,
@@ -89,10 +90,15 @@ func (w InstallWorkflow) Run(ctx *app.AppContext) error {
 	}
 	ctx.Logger.Info("msiexec started")
 	ctx.Logger.Info("executing command: msiexec.exe %s", strings.Join(MaskedMSIInstallArgs(installerPath, msiLogPath), " "))
+	msiStarted := time.Now()
 	commandResult := executor.Install(installerPath, invite, msiLogPath)
 	msi := ClassifyMSIInstallExitCode(commandResult.ExitCode)
 	result.MSI = msi
 	ctx.Logger.Info("msiexec exit code: %d", commandResult.ExitCode)
+	ctx.Logger.Info("msiexec duration: %s", time.Since(msiStarted).Round(time.Millisecond))
+	if strings.TrimSpace(commandResult.Output) != "" {
+		ctx.Logger.Info("msiexec output summary: %s", shortOutput(MaskInviteInText(commandResult.Output, invite)))
+	}
 	ctx.Logger.Info("MSI classified status: %s", msi.Status)
 
 	msiOperation := app.OperationResult{
@@ -154,6 +160,14 @@ func (w InstallWorkflow) Run(ctx *app.AppContext) error {
 		fmt.Print(summary)
 	}
 	return nil
+}
+
+func shortOutput(output string) string {
+	output = strings.Join(strings.Fields(output), " ")
+	if len(output) > 500 {
+		return output[:500] + "..."
+	}
+	return output
 }
 
 func (w InstallWorkflow) finishEarly(ctx *app.AppContext, result InstallResult, code int, step string, target string, message string, err error) error {

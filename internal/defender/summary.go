@@ -3,8 +3,10 @@ package defender
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"kigrepair/internal/detector"
+	"kigrepair/internal/reports"
 )
 
 func FormatPreflight(initial detector.DetectionReport, result DefenderEnsureResult, reportDir string) string {
@@ -22,6 +24,33 @@ func FormatPreflight(initial detector.DetectionReport, result DefenderEnsureResu
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+func defenderCommandName(ensure bool) string {
+	if ensure {
+		return "defender --ensure"
+	}
+	return "defender"
+}
+
+func defenderSummaryActions(result DefenderEnsureResult) []string {
+	if result.Ensure {
+		if len(result.AddedPaths) > 0 || len(result.FailedPaths) > 0 {
+			return []string{fmt.Sprintf("added=%d failed=%d", len(result.AddedPaths), len(result.FailedPaths))}
+		}
+		return []string{"No Defender exclusion changes were required"}
+	}
+	if len(result.MissingBefore) > 0 {
+		return []string{fmt.Sprintf("%d required Defender exclusion(s) missing", len(result.MissingBefore))}
+	}
+	return []string{"Defender exclusion status checked"}
+}
+
+func finishedOrNow(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Now()
+	}
+	return value
 }
 
 func FormatSummary(result DefenderEnsureResult, final *detector.DetectionReport) string {
@@ -94,7 +123,27 @@ func FormatSummary(result DefenderEnsureResult, final *detector.DetectionReport)
 	b.WriteString("Report:\n")
 	b.WriteString(result.ReportDir)
 	b.WriteString("\n")
-	return b.String()
+	finalHealth := ""
+	primaryService := ""
+	if final != nil {
+		finalHealth = string(final.Health)
+		primaryService = final.PrimaryService
+	}
+	return reports.FormatSummary(reports.SummaryData{
+		Command:        defenderCommandName(result.Ensure),
+		Started:        result.StartedAt,
+		Finished:       finishedOrNow(result.FinishedAt),
+		Mode:           result.Mode,
+		ExitCode:       result.ExitCode,
+		ReportDir:      result.ReportDir,
+		FinalHealth:    finalHealth,
+		InstallMode:    result.InstallMode,
+		InstallRoot:    result.InstallRoot,
+		PrimaryService: primaryService,
+		Warnings:       result.Warnings,
+		Errors:         result.Errors,
+		Actions:        defenderSummaryActions(result),
+	}, b.String())
 }
 
 func valueOrDash(value string) string {

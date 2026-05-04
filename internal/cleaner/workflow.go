@@ -50,7 +50,6 @@ func (w CleanupWorkflow) Run(ctx *app.AppContext) error {
 
 	plan := BuildPlan(report, PlanOptions{DryRun: w.DryRun})
 	plan.Actions = SortActionsForExecution(plan.Actions)
-	ctx.JSONValue = plan
 	ctx.Logger.Info("cleanup path validation completed")
 	ctx.Logger.Info("cleanup plan generated")
 	ctx.Logger.Info("cleanup plan action count: %d", len(plan.Actions))
@@ -116,10 +115,31 @@ func (w CleanupWorkflow) Run(ctx *app.AppContext) error {
 	}
 
 	if !w.DryRun {
+		ctx.JSONValue = CleanupPlanResult{
+			Command:          "cleanup",
+			InitialDetection: report,
+			CleanupPlan:      plan,
+			Operations:       ctx.Results,
+			ExitCode:         ctx.ExitCode,
+			ReportDir:        ctx.OutputDir,
+			Warnings:         plan.Warnings,
+			Errors:           plan.Blockers,
+		}
 		return w.runRealCleanup(ctx, report, plan)
 	}
 
-	summary := FormatDryRunSummary(report, plan, ctx.OutputDir)
+	ctx.ExitCode = cleanupDryRunExitCode(plan)
+	ctx.JSONValue = CleanupPlanResult{
+		Command:          "cleanup --dry-run",
+		InitialDetection: report,
+		CleanupPlan:      plan,
+		Operations:       ctx.Results,
+		ExitCode:         ctx.ExitCode,
+		ReportDir:        ctx.OutputDir,
+		Warnings:         plan.Warnings,
+		Errors:           plan.Blockers,
+	}
+	summary := FormatDryRunSummary(report, plan, ctx)
 	if err := ctx.Reporter.WriteText("summary", summary); err != nil {
 		return err
 	}
@@ -128,7 +148,6 @@ func (w CleanupWorkflow) Run(ctx *app.AppContext) error {
 	}
 
 	ctx.Logger.Info("dry-run completed without changes")
-	ctx.ExitCode = cleanupDryRunExitCode(plan)
 	if !ctx.Quiet && !ctx.JSONOutput {
 		fmt.Print(summary)
 	}
@@ -137,7 +156,7 @@ func (w CleanupWorkflow) Run(ctx *app.AppContext) error {
 
 func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.DetectionReport, plan CleanupPlan) error {
 	if len(plan.Blockers) > 0 || hasUnsafeAction(plan) {
-		ctx.ExitCode = 4
+		ctx.ExitCode = app.ExitInvalidInput
 		result := app.OperationResult{
 			Step:      "cleanup.blocked",
 			Target:    "cleanup-plan",
@@ -154,7 +173,7 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 			ExitCode:         ctx.ExitCode,
 			ReportDir:        ctx.OutputDir,
 		}
-		summary := FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx.OutputDir, ctx.ExitCode)
+		summary := FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx)
 		_ = ctx.Reporter.WriteText("summary", summary)
 		_ = ctx.Reporter.WriteOperations(ctx.Results)
 		if !ctx.Quiet && !ctx.JSONOutput {
@@ -164,7 +183,7 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 	}
 
 	if (ctx.Quiet || ctx.NonInteractive) && !w.Yes {
-		ctx.ExitCode = 3
+		ctx.ExitCode = app.ExitConfirmationRequired
 		message := "Real cleanup in non-interactive mode requires --yes"
 		result := app.OperationResult{
 			Step:      "cleanup.confirmation",
@@ -187,12 +206,12 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 			ReportDir:        ctx.OutputDir,
 		}
 		_ = ctx.Reporter.WriteOperations(ctx.Results)
-		_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx.OutputDir, ctx.ExitCode))
+		_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx))
 		return nil
 	}
 
 	if !checks.IsAdmin() {
-		ctx.ExitCode = 2
+		ctx.ExitCode = app.ExitAdminRequired
 		message := "Administrator rights are required for real cleanup"
 		result := app.OperationResult{
 			Step:      "cleanup.admin",
@@ -215,7 +234,7 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 			ReportDir:        ctx.OutputDir,
 		}
 		_ = ctx.Reporter.WriteOperations(ctx.Results)
-		_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx.OutputDir, ctx.ExitCode))
+		_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx))
 		return nil
 	}
 
@@ -224,7 +243,7 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 			fmt.Print(FormatRealCleanupPreflight(initial, plan, ctx.OutputDir))
 		}
 		if err := ConfirmCleanup(ctx, w.Yes, os.Stdin, os.Stdout); err != nil {
-			ctx.ExitCode = 3
+			ctx.ExitCode = app.ExitConfirmationRequired
 			message := err.Error()
 			if errors.Is(err, ErrConfirmationRequired) {
 				message = "Real cleanup in non-interactive mode requires --yes"
@@ -250,7 +269,7 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 				ReportDir:        ctx.OutputDir,
 			}
 			_ = ctx.Reporter.WriteOperations(ctx.Results)
-			_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx.OutputDir, ctx.ExitCode))
+			_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx))
 			return nil
 		}
 		ctx.Logger.Info("confirmation status: accepted")
@@ -277,7 +296,7 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 		ExitCode:         ctx.ExitCode,
 		ReportDir:        ctx.OutputDir,
 	}
-	summary := FormatRealCleanupSummary(initial, &final, plan, ctx.Results, ctx.OutputDir, ctx.ExitCode)
+	summary := FormatRealCleanupSummary(initial, &final, plan, ctx.Results, ctx)
 	if err := ctx.Reporter.WriteOperations(ctx.Results); err != nil {
 		return err
 	}
@@ -299,6 +318,17 @@ type CleanupExecutionResult struct {
 	ReportDir        string                    `json:"report_dir"`
 }
 
+type CleanupPlanResult struct {
+	Command          string                   `json:"command"`
+	InitialDetection detector.DetectionReport `json:"initial_detection"`
+	CleanupPlan      CleanupPlan              `json:"cleanup_plan"`
+	Operations       []app.OperationResult    `json:"operations"`
+	ExitCode         int                      `json:"exit_code"`
+	ReportDir        string                   `json:"report_dir"`
+	Warnings         []string                 `json:"warnings"`
+	Errors           []string                 `json:"errors"`
+}
+
 func hasUnsafeAction(plan CleanupPlan) bool {
 	for _, action := range plan.Actions {
 		if !action.Safe {
@@ -311,11 +341,11 @@ func hasUnsafeAction(plan CleanupPlan) bool {
 func cleanupDryRunExitCode(plan CleanupPlan) int {
 	switch {
 	case len(plan.Blockers) > 0:
-		return 2
+		return app.ExitInvalidInput
 	case len(plan.Warnings) > 0:
-		return 1
+		return app.ExitWarnings
 	default:
-		return 0
+		return app.ExitSuccess
 	}
 }
 
@@ -336,11 +366,11 @@ func realCleanupExitCode(results []app.OperationResult, final detector.Detection
 	leftovers := cleanupLeftoversRemain(final)
 	switch {
 	case hasFailure && leftovers:
-		return 5
+		return app.ExitCleanupFailed
 	case hasFailure || hasWarning:
-		return 1
+		return app.ExitWarnings
 	default:
-		return 0
+		return app.ExitSuccess
 	}
 }
 

@@ -3,9 +3,11 @@ package cleaner
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"kigrepair/internal/app"
 	"kigrepair/internal/detector"
+	"kigrepair/internal/reports"
 )
 
 func FormatRealCleanupPreflight(report detector.DetectionReport, plan CleanupPlan, reportDir string) string {
@@ -19,7 +21,7 @@ func FormatRealCleanupPreflight(report detector.DetectionReport, plan CleanupPla
 	return b.String()
 }
 
-func FormatRealCleanupSummary(initial detector.DetectionReport, final *detector.DetectionReport, plan CleanupPlan, results []app.OperationResult, reportDir string, exitCode int) string {
+func FormatRealCleanupSummary(initial detector.DetectionReport, final *detector.DetectionReport, plan CleanupPlan, results []app.OperationResult, ctx *app.AppContext) string {
 	var b strings.Builder
 	b.WriteString("Kigrepair Cleanup\n\n")
 	b.WriteString("Initial health: " + string(initial.Health) + "\n")
@@ -56,11 +58,67 @@ func FormatRealCleanupSummary(initial detector.DetectionReport, final *detector.
 	} else {
 		b.WriteString("Final health: not checked\n")
 	}
-	b.WriteString(fmt.Sprintf("Exit code: %d\n\n", exitCode))
+	b.WriteString(fmt.Sprintf("Exit code: %d\n\n", ctx.ExitCode))
 	b.WriteString("Report:\n")
-	b.WriteString(reportDir)
+	b.WriteString(ctx.OutputDir)
 	b.WriteString("\n")
-	return b.String()
+	finalHealth := ""
+	installMode := string(initial.InstallMode)
+	installRoot := initial.InstallRoot
+	primaryService := initial.PrimaryService
+	if final != nil {
+		finalHealth = string(final.Health)
+		installMode = string(final.InstallMode)
+		installRoot = final.InstallRoot
+		primaryService = final.PrimaryService
+	}
+	return reports.FormatSummary(reports.SummaryData{
+		Command:        "cleanup",
+		Started:        ctx.StartedAt,
+		Finished:       time.Now(),
+		Mode:           string(ctx.Mode),
+		ExitCode:       ctx.ExitCode,
+		ReportDir:      ctx.OutputDir,
+		InitialHealth:  string(initial.Health),
+		FinalHealth:    finalHealth,
+		InstallMode:    installMode,
+		InstallRoot:    installRoot,
+		PrimaryService: primaryService,
+		Warnings:       cleanupSummaryMessages(results, app.OperationStatusWarning),
+		Errors:         cleanupSummaryMessages(results, app.OperationStatusFailed),
+		Actions:        cleanupSummaryActions(results, plan),
+	}, b.String())
+}
+
+func cleanupSummaryMessages(results []app.OperationResult, status app.OperationStatus) []string {
+	messages := make([]string, 0)
+	for _, result := range results {
+		if result.Status != status {
+			continue
+		}
+		if result.Error != "" {
+			messages = append(messages, result.Error)
+		} else {
+			messages = append(messages, result.Message)
+		}
+	}
+	return messages
+}
+
+func cleanupSummaryActions(results []app.OperationResult, plan CleanupPlan) []string {
+	actions := make([]string, 0)
+	for _, result := range results {
+		if isExecutionResult(result) {
+			actions = append(actions, fmt.Sprintf("%s %s: %s", result.Step, result.Target, result.Status))
+		}
+	}
+	if len(actions) == 0 && len(plan.Actions) == 0 {
+		return []string{"No cleanup actions were required"}
+	}
+	if len(actions) == 0 {
+		return []string{"No cleanup actions executed"}
+	}
+	return actions
 }
 
 func writePlannedActions(b *strings.Builder, plan CleanupPlan) {

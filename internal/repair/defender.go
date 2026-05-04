@@ -65,8 +65,13 @@ func (w RepairWorkflow) runDefenderEnsure(ctx *app.AppContext, detect func() det
 	for _, path := range result.MissingBefore {
 		ctx.Logger.Info("attempting Defender exclusion add: %s", path)
 		ctx.Logger.Info("executing command: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command Add-MpPreference -ExclusionPath <path>")
+		started := time.Now()
 		commandResult := adder.AddExclusion(path)
+		ctx.Logger.Info("Add-MpPreference duration for %s: %s", path, time.Since(started).Round(time.Millisecond))
 		ctx.Logger.Info("Add-MpPreference exit code for %s: %d", path, commandResult.ExitCode)
+		if strings.TrimSpace(commandResult.Output) != "" {
+			ctx.Logger.Info("Add-MpPreference output summary for %s: %s", path, shortOutput(commandResult.Output))
+		}
 		if commandResult.ExitCode == 0 && commandResult.Err == nil {
 			result.AddedPaths = append(result.AddedPaths, path)
 			addOperation(ctx, "defender_ensure", path, app.OperationStatusSuccess, "Defender exclusion added", "")

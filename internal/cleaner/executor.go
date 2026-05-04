@@ -101,7 +101,9 @@ func (e Executor) stopService(action CleanupAction) app.OperationResult {
 	if e.Logger != nil {
 		e.Logger.Info("executing command: sc.exe stop %s", action.Target)
 	}
+	started := time.Now()
 	result := e.RunCommand("sc.exe", "stop", action.Target)
+	e.logCommandResult("sc.exe", result, time.Since(started))
 	if result.ExitCode != 0 && !strings.Contains(result.Output, "1062") {
 		return operation(action.Type, action.Target, app.OperationStatusFailed, "Service stop failed", resultError(result))
 	}
@@ -124,7 +126,9 @@ func (e Executor) deleteService(action CleanupAction) app.OperationResult {
 	if e.Logger != nil {
 		e.Logger.Info("executing command: sc.exe delete %s", action.Target)
 	}
+	started := time.Now()
 	result := e.RunCommand("sc.exe", "delete", action.Target)
+	e.logCommandResult("sc.exe", result, time.Since(started))
 	if result.ExitCode != 0 {
 		return operation(action.Type, action.Target, app.OperationStatusFailed, "Service deletion failed", resultError(result))
 	}
@@ -156,7 +160,9 @@ func (e Executor) killProcess(action CleanupAction) app.OperationResult {
 	if e.Logger != nil {
 		e.Logger.Info("executing command: taskkill /PID %d /F", pid)
 	}
+	started := time.Now()
 	result := e.RunCommand("taskkill.exe", "/PID", strconv.Itoa(pid), "/F")
+	e.logCommandResult("taskkill.exe", result, time.Since(started))
 	if result.ExitCode != 0 {
 		return operation(action.Type, action.Target, app.OperationStatusFailed, "Process kill failed", resultError(result))
 	}
@@ -169,7 +175,9 @@ func (e Executor) uninstallMSI(action CleanupAction) app.OperationResult {
 	if e.Logger != nil {
 		e.Logger.Info("executing command: msiexec %s", strings.Join(args, " "))
 	}
+	started := time.Now()
 	result := e.RunCommand("msiexec.exe", args...)
+	e.logCommandResult("msiexec.exe", result, time.Since(started))
 	classification := ClassifyMSIUninstallExitCode(result.ExitCode)
 	errText := ""
 	if classification.Status == app.OperationStatusFailed {
@@ -227,6 +235,28 @@ func (e Executor) deleteRegistryKey(action CleanupAction) app.OperationResult {
 		return operation(action.Type, action.Target, app.OperationStatusFailed, "Registry key deletion failed", err.Error())
 	}
 	return operation(action.Type, action.Target, app.OperationStatusSuccess, "Registry key deleted", "")
+}
+
+func (e Executor) logCommandResult(name string, result CommandResult, duration time.Duration) {
+	if e.Logger == nil {
+		return
+	}
+	e.Logger.Info("%s exit code: %d", name, result.ExitCode)
+	e.Logger.Info("%s duration: %s", name, duration.Round(time.Millisecond))
+	if strings.TrimSpace(result.Output) != "" {
+		e.Logger.Info("%s output summary: %s", name, shortCommandOutput(result.Output))
+	}
+	if result.Err != nil {
+		e.Logger.Warn("%s error: %v", name, result.Err)
+	}
+}
+
+func shortCommandOutput(output string) string {
+	output = strings.Join(strings.Fields(output), " ")
+	if len(output) > 500 {
+		return output[:500] + "..."
+	}
+	return output
 }
 
 func operation(step CleanupActionType, target string, status app.OperationStatus, message string, errText string) app.OperationResult {

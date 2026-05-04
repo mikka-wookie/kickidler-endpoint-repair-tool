@@ -45,6 +45,7 @@ func (w DefenderWorkflow) Run(ctx *app.AppContext) error {
 	startedAt := time.Now()
 	result := DefenderEnsureResult{
 		StartedAt:     startedAt,
+		Mode:          string(ctx.Mode),
 		Ensure:        w.Ensure,
 		AllKnownPaths: w.AllKnownPaths,
 		ReportDir:     ctx.OutputDir,
@@ -174,8 +175,13 @@ func (w DefenderWorkflow) Run(ctx *app.AppContext) error {
 	for _, path := range result.MissingBefore {
 		ctx.Logger.Info("attempting Defender exclusion add: %s", path)
 		ctx.Logger.Info("executing command: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command Add-MpPreference -ExclusionPath <path>")
+		started := time.Now()
 		commandResult := adder.AddExclusion(path)
+		ctx.Logger.Info("Add-MpPreference duration for %s: %s", path, time.Since(started).Round(time.Millisecond))
 		ctx.Logger.Info("Add-MpPreference exit code for %s: %d", path, commandResult.ExitCode)
+		if strings.TrimSpace(commandResult.Output) != "" {
+			ctx.Logger.Info("Add-MpPreference output summary for %s: %s", path, shortCommandOutput(commandResult.Output))
+		}
 		if commandResult.ExitCode == 0 && commandResult.Err == nil {
 			result.AddedPaths = append(result.AddedPaths, path)
 			addOperation(ctx, "defender_exclusion_add", path, app.OperationStatusSuccess, "Defender exclusion added", "")
@@ -204,6 +210,14 @@ func (w DefenderWorkflow) Run(ctx *app.AppContext) error {
 		addOperation(ctx, "defender_verify", "defender-exclusions", app.OperationStatusSuccess, "All required Defender exclusions are covered", "")
 	}
 	return w.finish(ctx, result, &final)
+}
+
+func shortCommandOutput(output string) string {
+	output = strings.Join(strings.Fields(output), " ")
+	if len(output) > 500 {
+		return output[:500] + "..."
+	}
+	return output
 }
 
 func RequiredPaths(report detector.DetectionReport, allKnown bool) ([]string, []string) {

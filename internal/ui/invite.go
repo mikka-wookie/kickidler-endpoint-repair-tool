@@ -1,5 +1,8 @@
 package ui
 
 func InvitePlaceholder(invite string) string {
-	return "invite placeholder: " + invite
+	if invite == "" {
+		return "invite: missing"
+	}
+	return "invite: provided"
 }
