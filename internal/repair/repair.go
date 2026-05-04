@@ -15,6 +15,7 @@ import (
 	"kigrepair/internal/detector"
 	"kigrepair/internal/installer"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/recommendations"
 	"kigrepair/internal/verifier"
 )
 
@@ -282,6 +283,18 @@ func (w RepairWorkflow) confirm(ctx *app.AppContext, initial detector.DetectionR
 func (w RepairWorkflow) finish(ctx *app.AppContext, result RepairResult, final *detector.DetectionReport) error {
 	result.FinishedAt = time.Now()
 	result.ExitCode = ctx.ExitCode
+	recommendation := recommendations.Plan(recommendations.RecommendationInput{
+		Detection:     final,
+		Verification:  recommendationVerification(result.Verification),
+		InstallerPath: result.InstallerPath,
+		HasInstaller:  strings.TrimSpace(result.InstallerPath) != "" || result.InstallerResolution != nil,
+		HasInvite:     result.InviteProvided,
+		IsAdmin:       final == nil || final.IsAdmin,
+		IsInteractive: !ctx.NonInteractive && !ctx.Quiet,
+		OutputDir:     ctx.OutputDir,
+		RepairFailed:  repairHardFailed(ctx.ExitCode),
+	})
+	result.Recommendation = &recommendation
 	ctx.JSONValue = result
 	ctx.Logger.Info("cleanup needed: %t", result.CleanupNeeded)
 	ctx.Logger.Info("cleanup executed: %t", result.CleanupExecuted)
@@ -300,6 +313,9 @@ func (w RepairWorkflow) finish(ctx *app.AppContext, result RepairResult, final *
 	if err := ctx.Reporter.WriteJSON("repair-result", result); err != nil {
 		return err
 	}
+	if err := ctx.Reporter.WriteJSON("recommendation-result", recommendation); err != nil {
+		return err
+	}
 	if result.Verification != nil {
 		if err := ctx.Reporter.WriteJSON("verification-result", result.Verification); err != nil {
 			return err
@@ -316,4 +332,24 @@ func (w RepairWorkflow) finish(ctx *app.AppContext, result RepairResult, final *
 		fmt.Print(summary)
 	}
 	return nil
+}
+
+func repairHardFailed(exitCode int) bool {
+	switch exitCode {
+	case ExitCleanupFailed, ExitInstallFailed, ExitVerificationFailed, ExitDefenderFailed, ExitInvalidInput, ExitUnexpectedError:
+		return true
+	default:
+		return false
+	}
+}
+
+func recommendationVerification(result *verifier.VerificationResult) *recommendations.VerificationState {
+	if result == nil {
+		return nil
+	}
+	return &recommendations.VerificationState{
+		OverallStatus: string(result.OverallStatus),
+		Warnings:      append([]string{}, result.Warnings...),
+		Errors:        append([]string{}, result.Errors...),
+	}
 }

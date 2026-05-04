@@ -5,10 +5,12 @@ import (
 	"strings"
 	"time"
 
+	"kigrepair/internal/recommendations"
 	"kigrepair/internal/reports"
 )
 
-func FormatSummary(result VerificationResult) string {
+func FormatSummary(result VerificationResult, recommendationsInput ...recommendations.RecommendationResult) string {
+	recommendation, hasRecommendation := optionalRecommendation(recommendationsInput)
 	var b strings.Builder
 	b.WriteString("Kigrepair Verify\n\n")
 	b.WriteString("Verification: " + string(result.OverallStatus) + "\n")
@@ -39,14 +41,23 @@ func FormatSummary(result VerificationResult) string {
 	b.WriteString("\n")
 	writeList(&b, "Warnings", result.Warnings)
 	writeList(&b, "Errors", result.Errors)
-	b.WriteString("Next recommended support action:\n")
-	b.WriteString("- " + nextAction(result) + "\n\n")
+	if hasRecommendation {
+		b.WriteString(recommendations.FormatConsole(recommendation))
+		b.WriteString("\n")
+	} else {
+		b.WriteString("Next recommended support action:\n")
+		b.WriteString("- " + nextAction(result) + "\n\n")
+	}
 	if result.ReportDir != "" {
 		b.WriteString("Report:\n")
 		b.WriteString(result.ReportDir)
 		b.WriteString("\n")
 	}
 
+	details := b.String()
+	if hasRecommendation {
+		details += recommendations.FormatSection(recommendation)
+	}
 	return reports.FormatSummary(reports.SummaryData{
 		Command:        commandOrVerify(result.Command),
 		Started:        result.StartedAt,
@@ -61,10 +72,11 @@ func FormatSummary(result VerificationResult) string {
 		Warnings:       result.Warnings,
 		Errors:         result.Errors,
 		Actions:        []string{"Verification: " + string(result.OverallStatus)},
-	}, b.String())
+	}, details)
 }
 
-func FormatConsoleSummary(result VerificationResult) string {
+func FormatConsoleSummary(result VerificationResult, recommendationsInput ...recommendations.RecommendationResult) string {
+	recommendation, hasRecommendation := optionalRecommendation(recommendationsInput)
 	var b strings.Builder
 	b.WriteString("Kigrepair Verify\n\n")
 	b.WriteString("Report directory: " + valueOrDash(result.ReportDir) + "\n")
@@ -73,9 +85,17 @@ func FormatConsoleSummary(result VerificationResult) string {
 	b.WriteString("Install root: " + valueOrDash(result.InstallRoot) + "\n")
 	b.WriteString("Verification status: " + string(result.OverallStatus) + "\n\n")
 	writeNonSuccessChecks(&b, result)
-	b.WriteString("Suggested next action:\n")
-	b.WriteString("- " + nextAction(result) + "\n")
+	if hasRecommendation {
+		b.WriteString(recommendations.FormatConsole(recommendation))
+	}
 	return b.String()
+}
+
+func optionalRecommendation(values []recommendations.RecommendationResult) (recommendations.RecommendationResult, bool) {
+	if len(values) == 0 {
+		return recommendations.RecommendationResult{}, false
+	}
+	return values[0], true
 }
 
 func valueOrDash(value string) string {

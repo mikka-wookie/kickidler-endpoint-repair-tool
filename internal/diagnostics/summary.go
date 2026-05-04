@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"kigrepair/internal/recommendations"
 	"kigrepair/internal/reports"
 )
 
@@ -42,6 +43,9 @@ func FormatCollectSummary(result CollectReportResult) string {
 			b.WriteString("- " + errText + "\n")
 		}
 		b.WriteString("\n")
+	}
+	if result.Recommendation != nil {
+		b.WriteString(recommendations.FormatSection(*result.Recommendation))
 	}
 	b.WriteString("Report:\n")
 	b.WriteString(result.ReportDir)

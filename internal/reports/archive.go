@@ -181,6 +181,7 @@ func bundleSpecs() []bundleSpec {
 		"defender-result.json",
 		"repair-result.json",
 		"verification-result.json",
+		"recommendation-result.json",
 		"collect-result.json",
 	}
 	specs := []bundleSpec{{sourceRel: "summary.txt", archiveRel: "summary.txt"}}

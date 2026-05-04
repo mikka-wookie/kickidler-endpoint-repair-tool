@@ -8,6 +8,7 @@ import (
 	"kigrepair/internal/app"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/recommendations"
 )
 
 type VerifyWorkflow struct {
@@ -63,7 +64,17 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 	result.ReportDir = ctx.OutputDir
 	result.ExitCode = ExitCode(result.OverallStatus)
 	ctx.ExitCode = result.ExitCode
-	ctx.JSONValue = result
+	recommendation := recommendations.Plan(recommendations.RecommendationInput{
+		Detection:     &final,
+		Verification:  recommendationVerification(result),
+		IsAdmin:       final.IsAdmin,
+		IsInteractive: !ctx.NonInteractive && !ctx.Quiet,
+		OutputDir:     ctx.OutputDir,
+	})
+	ctx.JSONValue = VerifyResult{
+		VerificationResult: result,
+		Recommendation:     recommendation,
+	}
 	ctx.Logger.Info("verification end: status=%s", result.OverallStatus)
 
 	operation := app.OperationResult{
@@ -81,11 +92,15 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 		return err
 	}
 	ctx.Logger.Info("wrote verification-result.json")
+	if err := ctx.Reporter.WriteJSON("recommendation-result", recommendation); err != nil {
+		return err
+	}
+	ctx.Logger.Info("wrote recommendation-result.json")
 	if err := ctx.Reporter.WriteOperations(ctx.Results); err != nil {
 		return err
 	}
 	ctx.Logger.Info("wrote operations.json")
-	summary := FormatSummary(result)
+	summary := FormatSummary(result, recommendation)
 	if err := ctx.Reporter.WriteText("summary", summary); err != nil {
 		return err
 	}
@@ -93,9 +108,22 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 	ctx.Logger.Info("final status: %s", result.OverallStatus)
 	ctx.Logger.Info("final exit code: %d", ctx.ExitCode)
 	if !ctx.Quiet && !ctx.JSONOutput {
-		fmt.Print(FormatConsoleSummary(result))
+		fmt.Print(FormatConsoleSummary(result, recommendation))
 	}
 	return nil
+}
+
+type VerifyResult struct {
+	VerificationResult
+	Recommendation recommendations.RecommendationResult `json:"recommendation"`
+}
+
+func recommendationVerification(result VerificationResult) *recommendations.VerificationState {
+	return &recommendations.VerificationState{
+		OverallStatus: string(result.OverallStatus),
+		Warnings:      append([]string{}, result.Warnings...),
+		Errors:        append([]string{}, result.Errors...),
+	}
 }
 
 func ExitCode(status VerificationStatus) int {

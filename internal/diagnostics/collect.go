@@ -10,6 +10,7 @@ import (
 	"kigrepair/internal/app"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/recommendations"
 	"kigrepair/internal/reports"
 )
 
@@ -57,6 +58,13 @@ func (w CollectReportWorkflow) Run(ctx *app.AppContext) error {
 	result.Health = string(detection.Health)
 	result.InstallMode = string(detection.InstallMode)
 	result.InstallRoot = detection.InstallRoot
+	recommendation := recommendations.Plan(recommendations.RecommendationInput{
+		Detection:     &detection,
+		IsAdmin:       detection.IsAdmin,
+		IsInteractive: !ctx.NonInteractive && !ctx.Quiet,
+		OutputDir:     ctx.OutputDir,
+	})
+	result.Recommendation = &recommendation
 	ctx.Logger.Info("admin status: %t", detection.IsAdmin)
 	ctx.Logger.Info("detected health/mode/root: %s / %s / %s", detection.Health, detection.InstallMode, detection.InstallRoot)
 
@@ -73,6 +81,10 @@ func (w CollectReportWorkflow) Run(ctx *app.AppContext) error {
 		return err
 	}
 	ctx.Logger.Info("Wrote operations.json")
+	if err := ctx.Reporter.WriteJSON("recommendation-result", recommendation); err != nil {
+		return err
+	}
+	ctx.Logger.Info("Wrote recommendation-result.json")
 
 	result.Collectors = collectorResults(ctx.Results)
 	for _, collector := range result.Collectors {
