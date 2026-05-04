@@ -24,6 +24,10 @@ func FormatInstallSummary(result InstallResult, final *detector.DetectionReport)
 		b.WriteString("Selected installer: " + result.Resolution.SelectedPath + "\n")
 		b.WriteString("Installer source: " + string(result.Resolution.SelectedSource) + "\n")
 	}
+	if result.Validation != nil {
+		b.WriteString("\n")
+		b.WriteString(FormatValidationSection(*result.Validation))
+	}
 	if result.InviteProvided {
 		b.WriteString("Invite: provided\n")
 	} else {
@@ -98,6 +102,53 @@ func FormatInstallSummary(result InstallResult, final *detector.DetectionReport)
 		Errors:         result.Errors,
 		Actions:        []string{"MSI install: " + valueOrDash(result.MSI.Status)},
 	}, b.String())
+}
+
+func FormatValidationSection(validation ValidationResult) string {
+	var b strings.Builder
+	b.WriteString("Installer Validation\n")
+	b.WriteString("--------------------\n")
+	b.WriteString("Status: " + valueOrDash(validation.Status) + "\n")
+	b.WriteString("Path: " + valueOrDash(validation.Path) + "\n")
+	b.WriteString("File name: " + valueOrDash(validation.FileName) + "\n")
+	b.WriteString("Architecture: " + valueOrDash(validation.Architecture) + "\n")
+	if validation.SizeBytes > 0 {
+		b.WriteString(fmt.Sprintf("Size: %d bytes\n", validation.SizeBytes))
+	}
+	b.WriteString("SHA-256: " + valueOrDash(validation.SHA256) + "\n")
+	b.WriteString("Product code: " + valueOrDash(validation.ProductCode) + "\n")
+	b.WriteString("Product code match: " + yesNoInstaller(validation.ProductCodeMatches) + "\n")
+	if validation.Signature != nil {
+		b.WriteString("Signature: " + valueOrDash(validation.Signature.Status) + "\n")
+	}
+	if len(validation.Warnings) > 0 {
+		b.WriteString("\nWarnings:\n")
+		for _, warning := range validation.Warnings {
+			b.WriteString("- " + warning + "\n")
+		}
+	}
+	if len(validation.Errors) > 0 {
+		b.WriteString("\nFailed checks:\n")
+		for _, check := range validation.Checks {
+			if check.Status == ValidationCheckFail {
+				b.WriteString("- " + check.Code + ": " + firstNonEmptyString(check.Evidence, check.Title) + "\n")
+			}
+		}
+		b.WriteString("\nAction:\n")
+		b.WriteString("Use a supported Grabber MSI installer:\n")
+		for _, name := range PreferredInstallerNames("amd64") {
+			b.WriteString("- " + name + "\n")
+		}
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func yesNoInstaller(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
 }
 
 func verifierSummary(result verifier.VerificationResult) string {

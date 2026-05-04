@@ -28,6 +28,11 @@ func (w PreflightWorkflow) Run(ctx *app.AppContext) error {
 	if err := ctx.Reporter.WriteJSON("preflight-result", result); err != nil {
 		return err
 	}
+	if result.InstallerValidation != nil {
+		if err := ctx.Reporter.WriteJSON("installer-validation", result.InstallerValidation); err != nil {
+			return err
+		}
+	}
 	addOperation(ctx, "preflight", "repair", preflightOperationStatus(result), "Preflight checks completed", strings.Join(result.Errors, "; "))
 	if err := ctx.Reporter.WriteOperations(ctx.Results); err != nil {
 		return err
@@ -49,6 +54,16 @@ func FormatPreflightSummary(result PreflightResult, exitCode int) string {
 		b.WriteString(check.Name + ": " + check.Status + "\n")
 		if check.Status == "fail" && check.Error != "" {
 			b.WriteString("  " + check.Error + "\n")
+		}
+	}
+	if result.InstallerValidation != nil {
+		b.WriteString("\nInstaller validation: " + result.InstallerValidation.Status + "\n")
+		b.WriteString("Installer: " + result.InstallerValidation.Path + "\n")
+		if result.InstallerValidation.SHA256 != "" {
+			b.WriteString("SHA-256: " + result.InstallerValidation.SHA256 + "\n")
+		}
+		if len(result.InstallerValidation.Warnings) > 0 {
+			b.WriteString(fmt.Sprintf("Warnings: %d\n", len(result.InstallerValidation.Warnings)))
 		}
 	}
 	b.WriteString("\nReport:\n")

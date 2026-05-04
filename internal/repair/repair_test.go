@@ -245,6 +245,44 @@ func TestRepairWorkflowInvalidInput(t *testing.T) {
 	}
 }
 
+func TestRepairValidatesInstallerBeforeCleanup(t *testing.T) {
+	ctx := newTestContext(t)
+	cleanupExec := &fakeCleanupExecutor{results: []app.OperationResult{{
+		Step:    string(cleaner.CleanupActionDeleteService),
+		Target:  "ngs",
+		Status:  app.OperationStatusSuccess,
+		Message: "Service deleted",
+	}}}
+	msiExec := &fakeMSIExecutor{}
+	wrong := tempTextFile(t)
+
+	err := RepairWorkflow{
+		Invite:    "abc123",
+		Installer: wrong,
+		Yes:       true,
+		IsAdmin:   func() bool { return true },
+		Detect:    func() detector.DetectionReport { return brokenReport() },
+		BuildCleanupPlan: func(detector.DetectionReport) cleaner.CleanupPlan {
+			return cleaner.CleanupPlan{Actions: []cleaner.CleanupAction{{Type: cleaner.CleanupActionDeleteService, Target: "ngs", Safe: true}}}
+		},
+		CleanupExecutor: cleanupExec,
+		MSIExecutor:     msiExec,
+	}.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if ctx.ExitCode != ExitInvalidInput {
+		t.Fatalf("ExitCode = %d, want %d", ctx.ExitCode, ExitInvalidInput)
+	}
+	if cleanupExec.ran {
+		t.Fatal("cleanup ran before invalid installer was blocked")
+	}
+	if msiExec.ran {
+		t.Fatal("msiexec ran for invalid installer")
+	}
+	assertExists(t, filepath.Join(ctx.OutputDir, "installer-validation.json"))
+}
+
 func TestRepairWorkflowConfirmationRules(t *testing.T) {
 	t.Run("non interactive without yes exits 3", func(t *testing.T) {
 		ctx := newTestContext(t)
