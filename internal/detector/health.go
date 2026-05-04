@@ -55,24 +55,24 @@ func CalculateHealth(report DetectionReport) (GrabberHealthStatus, []string, []s
 
 	if anyServiceExists && report.PrimaryService == "" {
 		issues = append(issues, "Known service exists but install root could not be resolved")
-		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --installer .\\grabber.msi")
+		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --yes")
 		return GrabberHealthBroken, issues, recommendations
 	}
 
 	if primaryServiceExists && report.ServiceExecutablePath == "" {
 		issues = append(issues, "Service "+primaryService.Name+" ImagePath could not be parsed")
-		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --installer .\\grabber.msi")
+		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --yes")
 		return GrabberHealthBroken, issues, recommendations
 	}
 
 	if primaryServiceExists && report.InstallRoot == "" {
 		issues = append(issues, "Service "+primaryService.Name+" install root could not be resolved")
-		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --installer .\\grabber.msi")
+		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --yes")
 		return GrabberHealthBroken, issues, recommendations
 	}
 
 	if primaryServiceExists && !allRequiredFilesExist {
-		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --installer .\\grabber.msi")
+		recommendations = appendRecommendation(recommendations, "Run: kigrepair.exe repair --invite <INVITE> --yes")
 		recommendations = appendRecommendation(recommendations, "Run cleanup if reinstall fails")
 		return GrabberHealthBroken, issues, recommendations
 	}

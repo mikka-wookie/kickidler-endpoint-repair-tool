@@ -21,6 +21,7 @@ type InstallWorkflow struct {
 	Executor MSIExecutor
 	Detect   func() detector.DetectionReport
 	IsAdmin  func() bool
+	Resolve  func(string) (InstallerResolution, error)
 }
 
 func (w InstallWorkflow) Name() string {
@@ -45,10 +46,17 @@ func (w InstallWorkflow) Run(ctx *app.AppContext) error {
 		return w.finishEarly(ctx, result, ExitInstallInvalidInvite, "install.validate_invite", "invite", "Invalid invite", err)
 	}
 
-	installerPath, err := ValidateInstallerPath(w.Installer)
-	if err != nil {
-		return w.finishEarly(ctx, result, ExitInstallInvalidInstaller, "install.validate_installer", "installer", "Invalid installer", err)
+	resolveInstaller := ResolveInstaller
+	if w.Resolve != nil {
+		resolveInstaller = w.Resolve
 	}
+	resolution, err := resolveInstaller(w.Installer)
+	result.Resolution = resolution
+	if err != nil {
+		return w.finishEarly(ctx, result, ExitInstallInvalidInstaller, "install.resolve_installer", "installer", "Installer could not be resolved", err)
+	}
+	LogInstallerResolution(ctx.Logger, resolution)
+	installerPath := resolution.SelectedPath
 	result.InstallerPath = installerPath
 	ctx.Logger.Info("installer path: %s", installerPath)
 
@@ -168,6 +176,33 @@ func shortOutput(output string) string {
 		return output[:500] + "..."
 	}
 	return output
+}
+
+func LogInstallerResolution(logger app.Logger, resolution InstallerResolution) {
+	if logger == nil {
+		return
+	}
+	logger.Info("installer OS architecture: %s", resolution.OSArchitecture)
+	if resolution.ExplicitPath != "" {
+		logger.Info("installer resolution mode: explicit")
+	} else {
+		logger.Info("installer resolution mode: auto-discovery")
+		logger.Info("supported installer search order: exe_dir, work_dir, work_assets, exe_assets")
+	}
+	for _, searchPath := range resolution.SearchPaths {
+		logger.Info("installer search path: source=%s dir=%s", searchPath.Source, searchPath.Dir)
+	}
+	for _, candidate := range resolution.Candidates {
+		logger.Info("installer candidate found: path=%s source=%s rank=%d package=%s arch=%s exists=%t",
+			candidate.Path, candidate.Source, candidate.PreferredRank, candidate.PackageType, candidate.Architecture, candidate.Exists)
+	}
+	if resolution.SelectedPath != "" {
+		logger.Info("selected installer: %s", resolution.SelectedPath)
+		logger.Info("selected installer source: %s", resolution.SelectedSource)
+	}
+	if resolution.Error != "" {
+		logger.Warn("installer resolution error: %s", resolution.Error)
+	}
 }
 
 func (w InstallWorkflow) finishEarly(ctx *app.AppContext, result InstallResult, code int, step string, target string, message string, err error) error {
