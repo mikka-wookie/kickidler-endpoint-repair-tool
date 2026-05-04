@@ -189,23 +189,47 @@ func TestRepairWorkflowResults(t *testing.T) {
 
 func TestRepairWorkflowInvalidInput(t *testing.T) {
 	tests := []struct {
-		name      string
-		invite    string
-		installer string
+		name             string
+		invite           string
+		installer        string
+		detect           func() detector.DetectionReport
+		installerResolve func(string) (installer.InstallerResolution, error)
 	}{
 		{name: "missing invite", installer: tempMSIName(t)},
 		{name: "invalid invite", invite: "bad&invite", installer: tempMSIName(t)},
-		{name: "missing installer", invite: "abc123"},
-		{name: "non msi installer", invite: "abc123", installer: tempTextFile(t)},
+		{
+			name:   "missing installer when install needed",
+			invite: "abc123",
+			detect: func() detector.DetectionReport { return brokenReport() },
+			installerResolve: func(string) (installer.InstallerResolution, error) {
+				return installer.InstallerResolution{SelectedSource: installer.InstallerSourceNotFound}, installer.ErrInstallerNotFound
+			},
+		},
+		{name: "non msi installer when install needed", invite: "abc123", installer: tempTextFile(t), detect: func() detector.DetectionReport { return brokenReport() }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := newTestContext(t)
+			detect := tt.detect
+			if detect == nil {
+				detect = func() detector.DetectionReport { return healthyReport(nil) }
+			}
 			err := RepairWorkflow{
-				Invite:    tt.invite,
-				Installer: tt.installer,
-				Yes:       true,
-				IsAdmin:   func() bool { return true },
+				Invite:            tt.invite,
+				Installer:         tt.installer,
+				Yes:               true,
+				IsAdmin:           func() bool { return true },
+				Detect:            detect,
+				InstallerResolver: tt.installerResolve,
+				BuildCleanupPlan: func(detector.DetectionReport) cleaner.CleanupPlan {
+					return cleaner.CleanupPlan{Actions: []cleaner.CleanupAction{{Type: cleaner.CleanupActionDeleteService, Target: "ngs", Safe: true}}}
+				},
+				CleanupExecutor: &fakeCleanupExecutor{results: []app.OperationResult{{
+					Step:    string(cleaner.CleanupActionDeleteService),
+					Target:  "ngs",
+					Status:  app.OperationStatusSuccess,
+					Message: "Service deleted",
+				}}},
 			}.Run(ctx)
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)

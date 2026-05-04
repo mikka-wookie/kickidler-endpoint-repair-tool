@@ -36,6 +36,15 @@ func FormatSummary(result RepairResult, final *detector.DetectionReport) string 
 	b.WriteString("Initial health: " + valueOrDash(result.InitialHealth) + "\n")
 	b.WriteString("Install mode: " + valueOrDash(result.InitialInstallMode) + "\n")
 	b.WriteString("Install root: " + valueOrDash(result.InitialInstallRoot) + "\n\n")
+	if result.InstallExecuted {
+		b.WriteString("Selected installer: " + valueOrDash(result.InstallerPath) + "\n")
+		if result.InstallerResolution != nil && result.InstallerResolution.SelectedSource != "" {
+			b.WriteString("Installer source: " + string(result.InstallerResolution.SelectedSource) + "\n")
+		}
+		b.WriteString("\n")
+	} else {
+		b.WriteString("Installer: not required\n\n")
+	}
 	if !result.CleanupExecuted && !result.InstallExecuted && result.InitialHealth == string(detector.GrabberHealthHealthy) {
 		b.WriteString("No reinstall required.\n")
 		if final != nil {

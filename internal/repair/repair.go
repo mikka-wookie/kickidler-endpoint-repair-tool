@@ -25,14 +25,15 @@ type RepairWorkflow struct {
 	Installer string `json:"installer,omitempty"`
 	Yes       bool   `json:"yes,omitempty"`
 
-	Detect           func() detector.DetectionReport
-	IsAdmin          func() bool
-	BuildCleanupPlan func(detector.DetectionReport) cleaner.CleanupPlan
-	CleanupExecutor  CleanupExecutor
-	MSIExecutor      installer.MSIExecutor
-	DefenderAdder    defender.ExclusionAdder
-	In               io.Reader
-	Out              io.Writer
+	Detect            func() detector.DetectionReport
+	IsAdmin           func() bool
+	BuildCleanupPlan  func(detector.DetectionReport) cleaner.CleanupPlan
+	CleanupExecutor   CleanupExecutor
+	MSIExecutor       installer.MSIExecutor
+	InstallerResolver func(string) (installer.InstallerResolution, error)
+	DefenderAdder     defender.ExclusionAdder
+	In                io.Reader
+	Out               io.Writer
 }
 
 func (w RepairWorkflow) Name() string {
@@ -55,12 +56,10 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 	ctx.Logger.Info("force: %t", ctx.Force)
 	addOperation(ctx, "repair_started", "grabber", app.OperationStatusSuccess, "Repair workflow started", "")
 
-	invite, installerPath, ok := w.validateInputs(ctx, &result)
+	invite, ok := w.validateInputs(ctx, &result)
 	if !ok {
 		return w.finish(ctx, result, nil)
 	}
-	result.InstallerPath = installerPath
-	ctx.Logger.Info("installer path: %s", installerPath)
 	addOperation(ctx, "validate_inputs", "repair-inputs", app.OperationStatusSuccess, "Repair inputs are valid", "")
 
 	isAdmin := checks.IsAdmin
@@ -169,10 +168,26 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 
 	var msi installer.MSIResult
 	if decision.InstallNeeded {
+		resolveInstaller := installer.ResolveInstaller
+		if w.InstallerResolver != nil {
+			resolveInstaller = w.InstallerResolver
+		}
+		resolution, err := resolveInstaller(w.Installer)
+		result.InstallerResolution = &resolution
+		if err != nil {
+			ctx.ExitCode = ExitInvalidInput
+			result.Errors = append(result.Errors, err.Error())
+			addOperation(ctx, "resolve_installer", "installer", app.OperationStatusFailed, "Installer could not be resolved", err.Error())
+			return w.finish(ctx, result, &initial)
+		}
+		installer.LogInstallerResolution(ctx.Logger, resolution)
+		installerPath := resolution.SelectedPath
+		result.InstallerPath = installerPath
+		addOperation(ctx, "resolve_installer", installerPath, app.OperationStatusSuccess, "Installer resolved from "+string(resolution.SelectedSource), "")
 		result.InstallExecuted = true
 		msi = w.runInstall(ctx, installerPath, invite)
 		result.RebootRequired = msi.RebootRequired
-		if err := ctx.Reporter.WriteJSON("install-result", installResult(startedAt, string(ctx.Mode), installerPath, result.InviteProvided, msi, ctx.OutputDir)); err != nil {
+		if err := ctx.Reporter.WriteJSON("install-result", installResult(startedAt, string(ctx.Mode), installerPath, result.InviteProvided, msi, ctx.OutputDir, resolution)); err != nil {
 			return err
 		}
 		if !msi.Success {
@@ -182,7 +197,7 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 		}
 	} else {
 		msi = installer.MSIResult{ExitCode: -1, Status: "not_run", Success: true, Message: "MSI install was not required"}
-		addOperation(ctx, "msi_install", installerPath, app.OperationStatusSkipped, "MSI install was not required", "")
+		addOperation(ctx, "msi_install", "installer", app.OperationStatusSkipped, "MSI install was not required", "")
 	}
 
 	defenderResult, defenderRan := w.runDefenderEnsure(ctx, detect, decision.DefenderNeeded)
@@ -215,22 +230,15 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 	return w.finish(ctx, result, &final)
 }
 
-func (w RepairWorkflow) validateInputs(ctx *app.AppContext, result *RepairResult) (string, string, bool) {
+func (w RepairWorkflow) validateInputs(ctx *app.AppContext, result *RepairResult) (string, bool) {
 	invite, err := installer.ValidateInvite(w.Invite)
 	if err != nil {
 		ctx.ExitCode = ExitInvalidInput
 		result.Errors = append(result.Errors, err.Error())
 		addOperation(ctx, "validate_inputs", "invite", app.OperationStatusFailed, "Invalid invite", err.Error())
-		return "", "", false
+		return "", false
 	}
-	installerPath, err := installer.ValidateInstallerPath(w.Installer)
-	if err != nil {
-		ctx.ExitCode = ExitInvalidInput
-		result.Errors = append(result.Errors, err.Error())
-		addOperation(ctx, "validate_inputs", "installer", app.OperationStatusFailed, "Invalid installer", err.Error())
-		return "", "", false
-	}
-	return invite, installerPath, true
+	return invite, true
 }
 
 func (w RepairWorkflow) buildCleanupPlan(report detector.DetectionReport) cleaner.CleanupPlan {

@@ -12,7 +12,17 @@ import (
 func FormatInstallSummary(result InstallResult, final *detector.DetectionReport) string {
 	var b strings.Builder
 	b.WriteString("Kigrepair Install\n\n")
-	b.WriteString("Installer: " + valueOrDash(result.InstallerPath) + "\n")
+	if result.Resolution.SelectedSource == InstallerSourceExplicit {
+		b.WriteString("Installer: explicit\n")
+	} else if result.Resolution.SelectedPath != "" {
+		b.WriteString("Installer: auto-detected\n")
+	} else {
+		b.WriteString("Installer: " + valueOrDash(result.InstallerPath) + "\n")
+	}
+	if result.Resolution.SelectedPath != "" {
+		b.WriteString("Selected installer: " + result.Resolution.SelectedPath + "\n")
+		b.WriteString("Installer source: " + string(result.Resolution.SelectedSource) + "\n")
+	}
 	if result.InviteProvided {
 		b.WriteString("Invite: provided\n")
 	} else {

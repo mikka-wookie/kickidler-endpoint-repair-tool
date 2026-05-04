@@ -53,12 +53,13 @@ func cleanupResult(plan cleaner.CleanupPlan, results []app.OperationResult) stru
 	}{Plan: plan, Operations: results}
 }
 
-func installResult(started time.Time, mode string, installerPath string, inviteProvided bool, msi installer.MSIResult, reportDir string) installer.InstallResult {
+func installResult(started time.Time, mode string, installerPath string, inviteProvided bool, msi installer.MSIResult, reportDir string, resolution installer.InstallerResolution) installer.InstallResult {
 	return installer.InstallResult{
 		StartedAt:      started,
 		FinishedAt:     time.Now(),
 		Mode:           mode,
 		InstallerPath:  installerPath,
+		Resolution:     resolution,
 		InviteProvided: inviteProvided,
 		MSI:            msi,
 		ReportDir:      reportDir,

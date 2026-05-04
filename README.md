@@ -11,7 +11,7 @@ Implemented commands:
 - `check` - detects the current Grabber installation state, classifies health, checks files/services/registry/Defender state, and writes reports.
 - `cleanup --dry-run` - builds and writes a cleanup plan without modifying the system.
 - `cleanup` - performs real cleanup of planned services, processes, files, registry leftovers, and MSI uninstall steps after confirmation and safety validation.
-- `install` - runs the MSI install command with the provided invite and installer path, then verifies final state.
+- `install` - resolves a Grabber MSI, runs the MSI install command with the provided invite, then verifies final state.
 - `defender` - reports Defender exclusion status for the detected installation.
 - `defender --ensure` - adds missing Defender exclusions after confirmation.
 - `repair` - runs detection, cleanup when needed, MSI install when needed, Defender ensure when needed, final verification, and reports.
@@ -84,7 +84,8 @@ Real cleanup:
 Install:
 
 ```powershell
-.\kigrepair.exe install --invite <INVITE> --installer .\grabber.msi
+.\kigrepair.exe install --invite <INVITE>
+.\kigrepair.exe install --invite <INVITE> --installer .\grabberTT.x64.msi
 ```
 
 Defender:
@@ -98,8 +99,9 @@ Defender:
 Repair:
 
 ```powershell
-.\kigrepair.exe repair --invite <INVITE> --installer .\grabber.msi
-.\kigrepair.exe repair --invite <INVITE> --installer .\grabber.msi --yes --quiet --non-interactive
+.\kigrepair.exe repair --invite <INVITE> --yes
+.\kigrepair.exe repair --invite <INVITE> --yes --quiet --non-interactive
+.\kigrepair.exe repair --invite <INVITE> --installer .\grabberTT.x64.msi --yes
 ```
 
 Collect diagnostics:
@@ -116,11 +118,33 @@ Version:
 .\kigrepair.exe version --json
 ```
 
-Support release packages are expected to contain `kigrepair.exe` and may also contain `grabber.msi`. When the MSI is included in the same folder, support engineers can run:
+Support release packages are expected to contain `kigrepair.exe` and may also contain one or more supported Grabber MSI installers. When a supported MSI is included near the executable, support engineers can run:
 
 ```powershell
-.\kigrepair.exe repair --invite <INVITE> --installer .\grabber.msi
+.\kigrepair.exe repair --invite <INVITE> --yes
 ```
+
+## Installer Auto-Discovery
+
+`install` and `repair` can run without `--installer`. `install` always requires a resolved MSI. `repair` resolves the MSI only when the repair decision requires an install, so a healthy endpoint can complete without an installer nearby.
+
+Supported auto-discovery filenames:
+
+- `grabberEM.x64.msi`
+- `grabberEM.x32.msi`
+- `grabberTT.x64.msi`
+- `grabberTT.x32.msi`
+- `grabber.msi`
+
+Lookup order:
+
+1. Explicit `--installer`, when provided. Invalid explicit paths fail and do not fall back.
+2. Directory next to `kigrepair.exe`.
+3. Current working directory.
+4. `.\assets\`
+5. `<kigrepair.exe directory>\assets\`
+
+On 64-bit Windows, x64 installers are preferred before x32 installers. On 32-bit Windows, x32 installers are preferred before x64 installers. EM is preferred over TT for the same architecture, and `grabber.msi` is the legacy fallback.
 
 ## JSON And Quiet Behavior
 
@@ -235,7 +259,7 @@ Release output is written to:
 dist\kigrepair-v0.1.0-windows-amd64\
 ```
 
-The package folder contains `kigrepair.exe`, `README.md`, `RELEASE_NOTES.md`, `checksums.txt`, and `kigrepair-v0.1.0-windows-amd64.zip`. If `grabber.msi` exists at `.\grabber.msi` or `.\assets\grabber.msi`, the script copies it into the release folder. If the MSI is missing, the build continues and packages the tool only.
+The package folder contains `kigrepair.exe`, `README.md`, `RELEASE_NOTES.md`, `checksums.txt`, and `kigrepair-v0.1.0-windows-amd64.zip`. If supported Grabber MSI files exist in the project root or `.\assets\`, the script copies all matching installers into the release folder. If no supported MSI is found, the build continues and packages the tool only.
 
 `checksums.txt` contains SHA256 hashes for packaged files. The ZIP is created with PowerShell `Compress-Archive`; no external archive tool is required.
 

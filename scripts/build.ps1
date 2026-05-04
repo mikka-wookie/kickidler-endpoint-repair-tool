@@ -42,6 +42,16 @@ function Copy-IfExists {
     return $false
 }
 
+function Get-SupportedInstallerNames {
+    return @(
+        "grabberEM.x64.msi",
+        "grabberEM.x32.msi",
+        "grabberTT.x64.msi",
+        "grabberTT.x32.msi",
+        "grabber.msi"
+    )
+}
+
 function Get-ReleaseNotesTemplate {
     param([string]$ReleaseVersion)
 
@@ -152,19 +162,21 @@ Invoke-Step "Copying documentation" {
 }
 
 if ($IncludeMSI) {
-    $msiCopied = $false
-    $candidateMSIs = @(
-        (Join-Path $repoRoot "grabber.msi"),
-        (Join-Path $repoRoot "assets\grabber.msi")
+    $copiedInstallers = @{}
+    $installerSearchDirs = @(
+        $repoRoot,
+        (Join-Path $repoRoot "assets")
     )
-    foreach ($candidate in $candidateMSIs) {
-        if (Copy-IfExists -Source $candidate -Destination (Join-Path $releaseDir "grabber.msi")) {
-            $msiCopied = $true
-            break
+    foreach ($dir in $installerSearchDirs) {
+        foreach ($name in Get-SupportedInstallerNames) {
+            $candidate = Join-Path $dir $name
+            if ((-not $copiedInstallers.ContainsKey($name)) -and (Copy-IfExists -Source $candidate -Destination (Join-Path $releaseDir $name))) {
+                $copiedInstallers[$name] = $true
+            }
         }
     }
-    if (-not $msiCopied) {
-        Write-Warning "grabber.msi not found; release package will contain kigrepair.exe only"
+    if ($copiedInstallers.Count -eq 0) {
+        Write-Warning "no Grabber MSI installers found; release package will contain kigrepair.exe only"
     }
 }
 
@@ -172,7 +184,7 @@ if ($IncludeMSI) {
 
 Invoke-Step "Generating checksums" {
     $checksumPath = Join-Path $releaseDir "checksums.txt"
-    $filesToHash = @("kigrepair.exe", "README.md", "RELEASE_NOTES.md", "grabber.msi")
+    $filesToHash = @("kigrepair.exe", "README.md", "RELEASE_NOTES.md") + (Get-SupportedInstallerNames)
     $lines = foreach ($name in $filesToHash) {
         $path = Join-Path $releaseDir $name
         if (Test-Path -LiteralPath $path -PathType Leaf) {
