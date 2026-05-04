@@ -19,6 +19,7 @@ import (
 	"kigrepair/internal/logging"
 	"kigrepair/internal/repair"
 	"kigrepair/internal/reports"
+	"kigrepair/internal/verifier"
 	"kigrepair/internal/winapi"
 )
 
@@ -56,6 +57,7 @@ func main() {
 	rootCmd.AddCommand(installCommand(opts))
 	rootCmd.AddCommand(defenderCommand(opts))
 	rootCmd.AddCommand(collectReportCommand(opts))
+	rootCmd.AddCommand(verifyCommand(opts))
 	rootCmd.AddCommand(versionCommand(opts))
 
 	if err := rootCmd.Execute(); err != nil {
@@ -156,6 +158,16 @@ func collectReportCommand(opts *globalOptions) *cobra.Command {
 	cmd.Flags().IntVar(&historyLimit, "history-limit", 5, "number of previous report folders to include")
 	cmd.Flags().BoolVar(&noZip, "no-zip", false, "skip creating kigrepair-support-bundle.zip")
 	return cmd
+}
+
+func verifyCommand(opts *globalOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "verify",
+		Short: "Verify the current Grabber installation state",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowWithAdmin(cmd, opts, "verify", false, verifier.VerifyWorkflow{})
+		},
+	}
 }
 
 func workflowCommand(use string, short string, opts *globalOptions, workflow app.Workflow) *cobra.Command {
