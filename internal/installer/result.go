@@ -13,6 +13,7 @@ type InstallResult struct {
 	Mode             string                       `json:"mode"`
 	InstallerPath    string                       `json:"installer_path"`
 	Resolution       InstallerResolution          `json:"installer_resolution"`
+	Validation       *ValidationResult            `json:"installer_validation,omitempty"`
 	InviteProvided   bool                         `json:"invite_provided"`
 	MSI              MSIResult                    `json:"msi"`
 	InitialHealth    string                       `json:"initial_health"`

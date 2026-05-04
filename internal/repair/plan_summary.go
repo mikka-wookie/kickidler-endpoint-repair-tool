@@ -79,6 +79,10 @@ func FormatDryRunSummary(plan RepairPlan, initial *detector.DetectionReport) str
 	b.WriteString("Installer:\n")
 	b.WriteString("- Found: " + yesNo(plan.Installer.InstallerFound) + "\n")
 	b.WriteString("- Path: " + valueOrDash(plan.Installer.InstallerPath) + "\n")
+	if plan.Installer.Validation != nil {
+		b.WriteString("- Validation: " + plan.Installer.Validation.Status + "\n")
+		b.WriteString("- Architecture: " + valueOrDash(plan.Installer.Validation.Architecture) + "\n")
+	}
 	b.WriteString("- SHA-256: " + valueOrDash(plan.Installer.SHA256) + "\n")
 	b.WriteString("- Would run msiexec: " + yesNo(plan.Installer.WouldRunMsiexec) + "\n")
 	b.WriteString("- Invite present: " + yesNo(plan.Installer.HasInvite) + "\n\n")

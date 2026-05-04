@@ -14,12 +14,9 @@ import (
 )
 
 func TestRepairDryRunBuildStatus(t *testing.T) {
-	msi := tempMSI(t)
+	msi := tempNamedMSI(t, "grabberEM.x64.msi")
 	resolver := func(string) (installer.InstallerResolution, error) {
-		return installer.InstallerResolution{
-			SelectedPath:   msi,
-			SelectedSource: installer.InstallerSourceExplicit,
-		}, nil
+		return testInstallerResolution(msi), nil
 	}
 	okCheck := func() (bool, error) { return true, nil }
 
@@ -111,6 +108,15 @@ func TestRepairDryRunBuildStatus(t *testing.T) {
 	}
 }
 
+func tempNamedMSI(t *testing.T, name string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte("msi"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestRepairDryRunPlansWithoutMutating(t *testing.T) {
 	ctx := newTestContext(t)
 	msi := tempMSI(t)
@@ -135,7 +141,7 @@ func TestRepairDryRunPlansWithoutMutating(t *testing.T) {
 			}}}
 		},
 		InstallerResolver: func(string) (installer.InstallerResolution, error) {
-			return installer.InstallerResolution{SelectedPath: msi, SelectedSource: installer.InstallerSourceExplicit}, nil
+			return testInstallerResolution(msi), nil
 		},
 		PowerShellCheck: func() (bool, error) { return true, nil },
 		MSIExecCheck:    func() (bool, error) { return true, nil },
@@ -176,7 +182,7 @@ func TestRepairDryRunRunWritesPlanOnlyArtifactsAndNoRawInvite(t *testing.T) {
 		Detect:           func() detector.DetectionReport { return healthyReport(nil) },
 		BuildCleanupPlan: emptyCleanupPlan,
 		InstallerResolver: func(string) (installer.InstallerResolution, error) {
-			return installer.InstallerResolution{SelectedPath: msi, SelectedSource: installer.InstallerSourceExplicit}, nil
+			return testInstallerResolution(msi), nil
 		},
 		PowerShellCheck: func() (bool, error) { return true, nil },
 		MSIExecCheck:    func() (bool, error) { return true, nil },
@@ -191,6 +197,7 @@ func TestRepairDryRunRunWritesPlanOnlyArtifactsAndNoRawInvite(t *testing.T) {
 		"cleanup-plan.json",
 		"classification-result.json",
 		"recommendation-result.json",
+		"installer-validation.json",
 		"operations.json",
 		"summary.txt",
 	} {
@@ -215,6 +222,29 @@ func TestRepairDryRunRunWritesPlanOnlyArtifactsAndNoRawInvite(t *testing.T) {
 	}
 	if !strings.Contains(plan.NextCommand, `--invite "<INVITE>"`) {
 		t.Fatalf("next command does not use invite placeholder: %q", plan.NextCommand)
+	}
+	if plan.Installer.Validation == nil || plan.Installer.Validation.Status == "" {
+		t.Fatalf("repair plan missing installer validation: %#v", plan.Installer.Validation)
+	}
+}
+
+func testInstallerResolution(path string) installer.InstallerResolution {
+	validation := installer.ValidateMSI(path, installer.ValidationOptions{
+		ExplicitPath:     true,
+		AllowUnknownName: true,
+		DeepMetadata:     false,
+		SignatureCheck:   false,
+	})
+	return installer.InstallerResolution{
+		SelectedPath:   path,
+		SelectedSource: installer.InstallerSourceExplicit,
+		Candidates: []installer.InstallerCandidate{{
+			Path:       path,
+			Name:       filepath.Base(path),
+			Source:     installer.InstallerSourceExplicit,
+			Exists:     true,
+			Validation: validation,
+		}},
 	}
 }
 

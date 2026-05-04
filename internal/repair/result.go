@@ -32,6 +32,7 @@ type RepairResult struct {
 	InviteProvided      bool                                  `json:"invite_provided"`
 	InstallerPath       string                                `json:"installer_path"`
 	InstallerResolution *installer.InstallerResolution        `json:"installer_resolution,omitempty"`
+	InstallerValidation *installer.ValidationResult           `json:"installer_validation,omitempty"`
 	InitialHealth       string                                `json:"initial_health"`
 	InitialInstallMode  string                                `json:"initial_install_mode"`
 	InitialInstallRoot  string                                `json:"initial_install_root"`

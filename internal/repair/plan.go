@@ -1,11 +1,8 @@
 package repair
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -88,6 +85,11 @@ func (w DryRunWorkflow) Run(ctx *app.AppContext) error {
 	}
 	if plan.Preflight != nil {
 		if err := ctx.Reporter.WriteJSON("preflight-result", plan.Preflight); err != nil {
+			return err
+		}
+	}
+	if plan.Installer.Validation != nil {
+		if err := ctx.Reporter.WriteJSON("installer-validation", plan.Installer.Validation); err != nil {
 			return err
 		}
 	}
@@ -300,15 +302,16 @@ type DefenderPlanSummary struct {
 }
 
 type InstallerPlanSummary struct {
-	Required          bool     `json:"required"`
-	InstallerPath     string   `json:"installer_path,omitempty"`
-	InstallerFound    bool     `json:"installer_found"`
-	InstallerReadable bool     `json:"installer_readable"`
-	SHA256            string   `json:"sha256,omitempty"`
-	Command           string   `json:"command,omitempty"`
-	WouldRunMsiexec   bool     `json:"would_run_msiexec"`
-	HasInvite         bool     `json:"has_invite"`
-	Warnings          []string `json:"warnings,omitempty"`
+	Required          bool                        `json:"required"`
+	InstallerPath     string                      `json:"installer_path,omitempty"`
+	InstallerFound    bool                        `json:"installer_found"`
+	InstallerReadable bool                        `json:"installer_readable"`
+	SHA256            string                      `json:"sha256,omitempty"`
+	Validation        *installer.ValidationResult `json:"validation,omitempty"`
+	Command           string                      `json:"command,omitempty"`
+	WouldRunMsiexec   bool                        `json:"would_run_msiexec"`
+	HasInvite         bool                        `json:"has_invite"`
+	Warnings          []string                    `json:"warnings,omitempty"`
 }
 
 type VerificationPlanSummary struct {
@@ -324,6 +327,7 @@ type PreflightResult struct {
 	InstallerPath       string                        `json:"installer_path,omitempty"`
 	InstallerReadable   bool                          `json:"installer_readable"`
 	InstallerResolution installer.InstallerResolution `json:"installer_resolution"`
+	InstallerValidation *installer.ValidationResult   `json:"installer_validation,omitempty"`
 	InvitePresent       bool                          `json:"invite_present"`
 	MSIExecAvailable    bool                          `json:"msiexec_available"`
 	PowerShellAvailable bool                          `json:"powershell_available"`
@@ -369,14 +373,35 @@ func RunPreflight(opts PreflightOptions) PreflightResult {
 	}
 	resolution, err := resolve(opts.Installer)
 	result.InstallerResolution = resolution
+	result.InstallerValidation = installer.ValidationFromResolution(resolution)
 	if err != nil {
+		if result.InstallerValidation != nil {
+			result.Warnings = append(result.Warnings, result.InstallerValidation.Warnings...)
+			if !result.InstallerValidation.IsUsable() {
+				result.Errors = append(result.Errors, result.InstallerValidation.ErrorSummary())
+			}
+		}
 		result.Errors = append(result.Errors, err.Error())
 		result.addCheck("installer_available", false, true, "", err.Error())
 	} else {
 		result.InstallerAvailable = true
 		result.InstallerPath = resolution.SelectedPath
-		result.InstallerReadable = fileReadable(resolution.SelectedPath)
-		result.addCheck("installer_available", true, true, "Installer is available", "")
+		validation := result.InstallerValidation
+		result.InstallerValidation = validation
+		if validation != nil {
+			result.InstallerReadable = validation.Readable
+			result.Warnings = append(result.Warnings, validation.Warnings...)
+			if !validation.IsUsable() {
+				result.InstallerAvailable = false
+				result.Errors = append(result.Errors, validation.ErrorSummary())
+				result.addCheck("installer_available", false, true, "", validation.ErrorSummary())
+			} else {
+				result.addCheck("installer_available", true, true, "Installer is available", "")
+			}
+		} else {
+			result.InstallerReadable = false
+			result.addCheck("installer_available", false, true, "", "installer validation did not run")
+		}
 	}
 
 	msiAvailable, msiErr := runAvailabilityCheck(opts.MSIExecCheck)
@@ -472,13 +497,12 @@ func BuildInstallerPlan(preflight PreflightResult, reportDir string, invite stri
 		InstallerReadable: preflight.InstallerReadable,
 		WouldRunMsiexec:   preflight.InstallerAvailable,
 		HasInvite:         hasValue(invite),
+		Validation:        preflight.InstallerValidation,
+	}
+	if preflight.InstallerValidation != nil {
+		plan.SHA256 = preflight.InstallerValidation.SHA256
 	}
 	if plan.InstallerFound {
-		if sum, err := sha256File(plan.InstallerPath); err == nil {
-			plan.SHA256 = sum
-		} else {
-			plan.Warnings = append(plan.Warnings, "Could not calculate installer SHA-256: "+err.Error())
-		}
 		plan.Command = fmt.Sprintf(`msiexec /i "%s" /qn /norestart invite=<REDACTED> /l*v "%s"`, plan.InstallerPath, filepath.Join(reportDir, "msi-install.log"))
 	}
 	return plan
@@ -585,6 +609,7 @@ func expectedRepairOutputs(plan cleaner.CleanupPlan) []string {
 		"classification-result.json",
 		"recommendation-result.json",
 		"repair-result.json",
+		"installer-validation.json",
 		"operations.json",
 		"summary.txt",
 		"repair.log",
@@ -606,6 +631,7 @@ func dryRunOutputs() []string {
 		"cleanup-plan.json",
 		"classification-result.json",
 		"recommendation-result.json",
+		"installer-validation.json",
 		"operations.json",
 		"summary.txt",
 		"repair.log",
@@ -617,24 +643,6 @@ func runAvailabilityCheck(check func() (bool, error)) (bool, error) {
 		return false, errors.New("availability check is not configured")
 	}
 	return check()
-}
-
-func fileReadable(path string) bool {
-	file, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	_ = file.Close()
-	return true
-}
-
-func sha256File(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
 }
 
 func errorString(err error) string {

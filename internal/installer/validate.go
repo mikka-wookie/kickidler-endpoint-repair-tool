@@ -3,11 +3,8 @@ package installer
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-
-	"kigrepair/internal/detector"
 )
 
 var (
@@ -35,19 +32,16 @@ func ValidateInstallerPath(value string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrInvalidInstaller, err)
 	}
-	abs = detector.NormalizeWindowsPath(abs)
-	if !strings.EqualFold(filepath.Ext(abs), ".msi") {
-		return "", fmt.Errorf("%w: installer must be an .msi file", ErrInvalidInstaller)
+	validation := ValidateMSI(abs, ValidationOptions{
+		ExplicitPath:        true,
+		AllowUnknownName:    true,
+		DeepMetadata:        false,
+		SignatureCheck:      false,
+		ExpectedProductCode: "",
+		ExpectedPackedCode:  "",
+	})
+	if !validation.IsUsable() {
+		return "", fmt.Errorf("%w: %s", ErrInvalidInstaller, validation.ErrorSummary())
 	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("%w: installer file does not exist", ErrInvalidInstaller)
-		}
-		return "", fmt.Errorf("%w: %v", ErrInvalidInstaller, err)
-	}
-	if info.IsDir() {
-		return "", fmt.Errorf("%w: installer path is a directory", ErrInvalidInstaller)
-	}
-	return abs, nil
+	return validation.Path, nil
 }
