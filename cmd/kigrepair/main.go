@@ -19,6 +19,7 @@ import (
 	"kigrepair/internal/logging"
 	"kigrepair/internal/repair"
 	"kigrepair/internal/reports"
+	"kigrepair/internal/verifier"
 	"kigrepair/internal/winapi"
 )
 
@@ -56,6 +57,7 @@ func main() {
 	rootCmd.AddCommand(installCommand(opts))
 	rootCmd.AddCommand(defenderCommand(opts))
 	rootCmd.AddCommand(collectReportCommand(opts))
+	rootCmd.AddCommand(verifyCommand(opts))
 	rootCmd.AddCommand(versionCommand(opts))
 
 	if err := rootCmd.Execute(); err != nil {
@@ -64,7 +66,7 @@ func main() {
 			os.Exit(exitErr.Code)
 		}
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(app.ExitUnexpectedError)
 	}
 }
 
@@ -156,6 +158,16 @@ func collectReportCommand(opts *globalOptions) *cobra.Command {
 	cmd.Flags().IntVar(&historyLimit, "history-limit", 5, "number of previous report folders to include")
 	cmd.Flags().BoolVar(&noZip, "no-zip", false, "skip creating kigrepair-support-bundle.zip")
 	return cmd
+}
+
+func verifyCommand(opts *globalOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "verify",
+		Short: "Verifies current Grabber installation state without modifying the system",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowWithAdmin(cmd, opts, "verify", false, verifier.VerifyWorkflow{})
+		},
+	}
 }
 
 func workflowCommand(use string, short string, opts *globalOptions, workflow app.Workflow) *cobra.Command {
@@ -270,7 +282,7 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	}
 	ctx.Reporter = reporter
 
-	logger, err := logging.New(reports.LogPath(ctx.OutputDir), ctx.Quiet || ctx.JSONOutput)
+	logger, err := logging.New(reports.LogPath(ctx.OutputDir), ctx.Quiet || ctx.JSONOutput || workflow.Name() == "verify")
 	if err != nil {
 		return err
 	}
@@ -291,7 +303,7 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 			return err
 		}
 		fmt.Println(string(encoded))
-	} else if !ctx.Quiet {
+	} else if !ctx.Quiet && workflow.Name() != "verify" {
 		fmt.Printf("Report directory: %s\n", ctx.OutputDir)
 	}
 	if ctx.ExitCode != 0 {
