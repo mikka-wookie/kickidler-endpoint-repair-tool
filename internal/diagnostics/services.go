@@ -1,6 +1,8 @@
 package diagnostics
 
 import (
+	"path/filepath"
+
 	"kigrepair/internal/app"
 	"kigrepair/internal/detector"
 )
@@ -14,5 +16,9 @@ func (ServicesCollector) Name() string {
 }
 
 func (c ServicesCollector) Collect(ctx *app.AppContext) app.OperationResult {
-	return writeJSON(ctx, "services", c.Report.Services)
+	if err := ctx.Reporter.WriteJSON("system/services", c.Report.Services); err != nil {
+		return operation("collect.services", "system/services.json", app.OperationStatusFailed, "Failed to write system/services.json", err.Error())
+	}
+	ctx.Logger.Info("output file created: %s", filepath.Join(ctx.OutputDir, "system", "services.json"))
+	return operation("collect.services", "system/services.json", app.OperationStatusSuccess, "Wrote system/services.json", "")
 }

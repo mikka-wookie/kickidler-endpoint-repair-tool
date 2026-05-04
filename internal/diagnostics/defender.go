@@ -1,6 +1,8 @@
 package diagnostics
 
 import (
+	"path/filepath"
+
 	"kigrepair/internal/app"
 	"kigrepair/internal/detector"
 )
@@ -14,5 +16,9 @@ func (DefenderCollector) Name() string {
 }
 
 func (c DefenderCollector) Collect(ctx *app.AppContext) app.OperationResult {
-	return writeJSON(ctx, "defender", c.Report.Defender)
+	if err := ctx.Reporter.WriteJSON("system/defender", c.Report.Defender); err != nil {
+		return operation("collect.defender", "system/defender.json", app.OperationStatusFailed, "Failed to write system/defender.json", err.Error())
+	}
+	ctx.Logger.Info("output file created: %s", filepath.Join(ctx.OutputDir, "system", "defender.json"))
+	return operation("collect.defender", "system/defender.json", app.OperationStatusSuccess, "Wrote system/defender.json", "")
 }
