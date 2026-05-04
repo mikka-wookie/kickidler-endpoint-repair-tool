@@ -173,6 +173,8 @@ type bundleSpec struct {
 
 func bundleSpecs() []bundleSpec {
 	reportNames := []string{
+		"repair-plan.json",
+		"preflight-result.json",
 		"initial-detection.json",
 		"final-detection.json",
 		"operations.json",
