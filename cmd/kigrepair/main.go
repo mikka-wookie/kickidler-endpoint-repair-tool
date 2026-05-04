@@ -53,6 +53,7 @@ func main() {
 
 	rootCmd.AddCommand(workflowCommand("check", "Detect Kickidler Grabber installation state", opts, checks.CheckWorkflow{}))
 	rootCmd.AddCommand(repairCommand(opts))
+	rootCmd.AddCommand(preflightCommand(opts))
 	rootCmd.AddCommand(cleanupCommand(opts))
 	rootCmd.AddCommand(installCommand(opts))
 	rootCmd.AddCommand(defenderCommand(opts))
@@ -74,16 +75,36 @@ func repairCommand(opts *globalOptions) *cobra.Command {
 	var invite string
 	var installerPath string
 	var yes bool
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "repair",
 		Short: "Repair Grabber by cleaning broken state, installing MSI, and ensuring Defender exclusions",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if dryRun {
+				return runWorkflowWithAdmin(cmd, opts, "repair --dry-run", false, repair.DryRunWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
+			}
 			return runWorkflowWithAdmin(cmd, opts, "repair", true, repair.RepairWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
 		},
 	}
 	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
 	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
 	cmd.Flags().BoolVar(&yes, "yes", false, "confirm repair without prompting")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview repair workflow without modifying the system")
+	return cmd
+}
+
+func preflightCommand(opts *globalOptions) *cobra.Command {
+	var invite string
+	var installerPath string
+	cmd := &cobra.Command{
+		Use:   "preflight",
+		Short: "Run read-only repair preflight checks",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowWithAdmin(cmd, opts, "preflight", false, repair.PreflightWorkflow{Invite: invite, Installer: installerPath})
+		},
+	}
+	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
+	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
 	return cmd
 }
 
@@ -298,12 +319,13 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 		if ctx.JSONValue != nil {
 			value = ctx.JSONValue
 		}
-		encoded, err := json.MarshalIndent(value, "", "  ")
-		if err != nil {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		encoder.SetEscapeHTML(false)
+		if err := encoder.Encode(value); err != nil {
 			return err
 		}
-		fmt.Println(string(encoded))
-	} else if !ctx.Quiet && workflow.Name() != "verify" {
+	} else if !ctx.Quiet && workflow.Name() != "verify" && workflow.Name() != "repair --dry-run" && workflow.Name() != "preflight" {
 		fmt.Printf("Report directory: %s\n", ctx.OutputDir)
 	}
 	if ctx.ExitCode != 0 {
