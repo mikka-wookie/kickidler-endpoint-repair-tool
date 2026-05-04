@@ -1,6 +1,12 @@
 package diagnostics
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"kigrepair/internal/reports"
+)
 
 func FormatCollectSummary(result CollectReportResult) string {
 	var b strings.Builder
@@ -35,7 +41,38 @@ func FormatCollectSummary(result CollectReportResult) string {
 	b.WriteString("Report:\n")
 	b.WriteString(result.ReportDir)
 	b.WriteString("\n")
-	return b.String()
+	return reports.FormatSummary(reports.SummaryData{
+		Command:       "collect-report",
+		Started:       result.StartedAt,
+		Finished:      finishedOrNow(result.FinishedAt),
+		Mode:          result.Mode,
+		ExitCode:      result.ExitCode,
+		ReportDir:     result.ReportDir,
+		InitialHealth: result.Health,
+		InstallMode:   result.InstallMode,
+		InstallRoot:   result.InstallRoot,
+		Warnings:      result.Warnings,
+		Errors:        result.Errors,
+		Actions:       collectSummaryActions(result),
+	}, b.String())
+}
+
+func collectSummaryActions(result CollectReportResult) []string {
+	actions := make([]string, 0, len(result.Collectors)+1)
+	for _, collector := range result.Collectors {
+		actions = append(actions, collector.Name+": "+collector.Status)
+	}
+	if result.BundlePath != "" {
+		actions = append(actions, fmt.Sprintf("Support bundle: %s", result.BundlePath))
+	}
+	return actions
+}
+
+func finishedOrNow(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Now()
+	}
+	return value
 }
 
 func valueOrDash(value string) string {

@@ -172,7 +172,7 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 		result.InstallExecuted = true
 		msi = w.runInstall(ctx, installerPath, invite)
 		result.RebootRequired = msi.RebootRequired
-		if err := ctx.Reporter.WriteJSON("install-result", installResult(startedAt, installerPath, result.InviteProvided, msi, ctx.OutputDir)); err != nil {
+		if err := ctx.Reporter.WriteJSON("install-result", installResult(startedAt, string(ctx.Mode), installerPath, result.InviteProvided, msi, ctx.OutputDir)); err != nil {
 			return err
 		}
 		if !msi.Success {

@@ -36,6 +36,7 @@ func (w CollectReportWorkflow) Run(ctx *app.AppContext) error {
 	startedAt := time.Now()
 	result := CollectReportResult{
 		StartedAt:  startedAt,
+		Mode:       string(ctx.Mode),
 		ReportDir:  ctx.OutputDir,
 		Collectors: []CollectorResult{},
 		Warnings:   []string{},

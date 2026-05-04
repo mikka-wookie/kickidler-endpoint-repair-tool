@@ -8,6 +8,7 @@ import (
 	"kigrepair/internal/app"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/reports"
 )
 
 type CheckWorkflow struct{}
@@ -19,7 +20,6 @@ func (w CheckWorkflow) Name() string {
 func (w CheckWorkflow) Run(ctx *app.AppContext) error {
 	ctx.Logger.Info("Starting detection-only check")
 	report := detector.Detect()
-	ctx.JSONValue = report
 	logDefenderDetection(ctx.Logger, report)
 
 	status := app.OperationStatusSuccess
@@ -39,7 +39,16 @@ func (w CheckWorkflow) Run(ctx *app.AppContext) error {
 		return err
 	}
 	ctx.Logger.Info("Wrote initial-detection.json")
-	if err := ctx.Reporter.WriteText("summary", FormatSummary(report, ctx.OutputDir)); err != nil {
+	ctx.ExitCode = exitCodeForHealth(report.Health)
+	ctx.JSONValue = CheckResult{
+		Command:   "check",
+		ReportDir: ctx.OutputDir,
+		ExitCode:  ctx.ExitCode,
+		Warnings:  report.Recommendations,
+		Errors:    report.Issues,
+		Detection: report,
+	}
+	if err := ctx.Reporter.WriteText("summary", FormatSummary(report, ctx)); err != nil {
 		return err
 	}
 	ctx.Logger.Info("Wrote summary.txt")
@@ -47,11 +56,19 @@ func (w CheckWorkflow) Run(ctx *app.AppContext) error {
 		return err
 	}
 	ctx.Logger.Info("Wrote operations.json")
-	ctx.ExitCode = exitCodeForHealth(report.Health)
 	if !ctx.Quiet && !ctx.JSONOutput {
-		fmt.Print(FormatConsoleSummary(report, ctx.OutputDir))
+		fmt.Print(FormatConsoleSummary(report, ctx))
 	}
 	return nil
+}
+
+type CheckResult struct {
+	Command   string                   `json:"command"`
+	ReportDir string                   `json:"report_dir"`
+	ExitCode  int                      `json:"exit_code"`
+	Warnings  []string                 `json:"warnings"`
+	Errors    []string                 `json:"errors"`
+	Detection detector.DetectionReport `json:"detection"`
 }
 
 func exitCodeForHealth(health detector.GrabberHealthStatus) int {
@@ -69,11 +86,11 @@ func exitCodeForHealth(health detector.GrabberHealthStatus) int {
 	}
 }
 
-func FormatConsoleSummary(report detector.DetectionReport, reportDir string) string {
-	return FormatSummary(report, reportDir)
+func FormatConsoleSummary(report detector.DetectionReport, ctx *app.AppContext) string {
+	return FormatSummary(report, ctx)
 }
 
-func FormatSummary(report detector.DetectionReport, reportDir string) string {
+func FormatSummary(report detector.DetectionReport, ctx *app.AppContext) string {
 	var b strings.Builder
 	b.WriteString("Kigrepair Check Summary\n\n")
 	b.WriteString("Health: " + string(report.Health) + "\n")
@@ -101,9 +118,23 @@ func FormatSummary(report detector.DetectionReport, reportDir string) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("Report:\n")
-	b.WriteString(reportDir)
+	b.WriteString(ctx.OutputDir)
 	b.WriteString("\n")
-	return b.String()
+	return reports.FormatSummary(reports.SummaryData{
+		Command:        "check",
+		Started:        ctx.StartedAt,
+		Finished:       time.Now(),
+		Mode:           string(ctx.Mode),
+		ExitCode:       ctx.ExitCode,
+		ReportDir:      ctx.OutputDir,
+		InitialHealth:  string(report.Health),
+		InstallMode:    string(report.InstallMode),
+		InstallRoot:    report.InstallRoot,
+		PrimaryService: report.PrimaryService,
+		Warnings:       report.Recommendations,
+		Errors:         report.Issues,
+		Actions:        []string{"Detection completed with health: " + string(report.Health)},
+	}, b.String())
 }
 
 func valueOrDash(value string) string {

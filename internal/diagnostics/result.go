@@ -5,6 +5,7 @@ import "time"
 type CollectReportResult struct {
 	StartedAt   time.Time         `json:"started_at"`
 	FinishedAt  time.Time         `json:"finished_at"`
+	Mode        string            `json:"mode"`
 	ReportDir   string            `json:"report_dir"`
 	BundlePath  string            `json:"bundle_path,omitempty"`
 	Collectors  []CollectorResult `json:"collectors"`

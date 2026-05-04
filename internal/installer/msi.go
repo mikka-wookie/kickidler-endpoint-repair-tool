@@ -63,3 +63,13 @@ func ClassifyMSIInstallExitCode(code int) MSIResult {
 func MaskedMSIInstallArgs(installerPath string, logPath string) []string {
 	return []string{"/i", installerPath, "/qn", "/norestart", "invite=***", "/l*v", logPath}
 }
+
+func MaskInviteInText(text string, invite string) string {
+	invite = strings.TrimSpace(invite)
+	if invite == "" || text == "" {
+		return text
+	}
+	masked := strings.ReplaceAll(text, invite, "***")
+	masked = strings.ReplaceAll(masked, "invite=***", "invite=***")
+	return masked
+}

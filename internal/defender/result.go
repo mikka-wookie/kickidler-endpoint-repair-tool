@@ -1,10 +1,15 @@
 package defender
 
-import "time"
+import (
+	"time"
+
+	"kigrepair/internal/app"
+)
 
 type DefenderEnsureResult struct {
 	StartedAt          time.Time `json:"started_at"`
 	FinishedAt         time.Time `json:"finished_at"`
+	Mode               string    `json:"mode"`
 	Ensure             bool      `json:"ensure"`
 	AllKnownPaths      bool      `json:"all_known_paths,omitempty"`
 	InstallMode        string    `json:"install_mode"`
@@ -23,12 +28,12 @@ type DefenderEnsureResult struct {
 }
 
 const (
-	ExitOK                   = 0
-	ExitWarnings             = 1
-	ExitAdminRequired        = 2
-	ExitConfirmationRequired = 3
-	ExitNoInstallationRoot   = 4
-	ExitAddFailed            = 5
-	ExitVerificationFailed   = 6
-	ExitUnexpectedError      = 10
+	ExitOK                   = app.ExitSuccess
+	ExitWarnings             = app.ExitWarnings
+	ExitAdminRequired        = app.ExitAdminRequired
+	ExitConfirmationRequired = app.ExitConfirmationRequired
+	ExitNoInstallationRoot   = app.ExitInvalidInput
+	ExitAddFailed            = app.ExitDefenderFailed
+	ExitVerificationFailed   = app.ExitVerificationFailed
+	ExitUnexpectedError      = app.ExitUnexpectedError
 )

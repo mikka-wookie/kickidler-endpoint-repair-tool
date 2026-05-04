@@ -3,8 +3,10 @@ package installer
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"kigrepair/internal/detector"
+	"kigrepair/internal/reports"
 )
 
 func FormatInstallSummary(result InstallResult, final *detector.DetectionReport) string {
@@ -55,7 +57,39 @@ func FormatInstallSummary(result InstallResult, final *detector.DetectionReport)
 	b.WriteString("Report:\n")
 	b.WriteString(result.ReportDir)
 	b.WriteString("\n")
-	return b.String()
+	finalHealth := result.FinalHealth
+	installMode := result.FinalInstallMode
+	installRoot := result.FinalInstallRoot
+	primaryService := ""
+	if final != nil {
+		finalHealth = string(final.Health)
+		installMode = string(final.InstallMode)
+		installRoot = final.InstallRoot
+		primaryService = final.PrimaryService
+	}
+	return reports.FormatSummary(reports.SummaryData{
+		Command:        "install",
+		Started:        result.StartedAt,
+		Finished:       finishedOrNow(result.FinishedAt),
+		Mode:           result.Mode,
+		ExitCode:       result.ExitCode,
+		ReportDir:      result.ReportDir,
+		InitialHealth:  result.InitialHealth,
+		FinalHealth:    finalHealth,
+		InstallMode:    installMode,
+		InstallRoot:    installRoot,
+		PrimaryService: primaryService,
+		Warnings:       result.Warnings,
+		Errors:         result.Errors,
+		Actions:        []string{"MSI install: " + valueOrDash(result.MSI.Status)},
+	}, b.String())
+}
+
+func finishedOrNow(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Now()
+	}
+	return value
 }
 
 func valueOrDash(value string) string {

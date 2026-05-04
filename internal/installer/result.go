@@ -1,10 +1,15 @@
 package installer
 
-import "time"
+import (
+	"time"
+
+	"kigrepair/internal/app"
+)
 
 type InstallResult struct {
 	StartedAt        time.Time `json:"started_at"`
 	FinishedAt       time.Time `json:"finished_at"`
+	Mode             string    `json:"mode"`
 	InstallerPath    string    `json:"installer_path"`
 	InviteProvided   bool      `json:"invite_provided"`
 	MSI              MSIResult `json:"msi"`
@@ -19,13 +24,13 @@ type InstallResult struct {
 }
 
 const (
-	ExitInstallSuccess            = 0
-	ExitInstallWarnings           = 1
-	ExitInstallAdminRequired      = 2
-	ExitInstallInvalidInvite      = 3
-	ExitInstallInvalidInstaller   = 4
-	ExitInstallMSIFailed          = 5
-	ExitInstallVerificationFailed = 6
-	ExitInstallRebootRequired     = 9
-	ExitInstallUnexpectedError    = 10
+	ExitInstallSuccess            = app.ExitSuccess
+	ExitInstallWarnings           = app.ExitWarnings
+	ExitInstallAdminRequired      = app.ExitAdminRequired
+	ExitInstallInvalidInvite      = app.ExitInvalidInput
+	ExitInstallInvalidInstaller   = app.ExitInvalidInput
+	ExitInstallMSIFailed          = app.ExitInstallFailed
+	ExitInstallVerificationFailed = app.ExitVerificationFailed
+	ExitInstallRebootRequired     = app.ExitRebootRequired
+	ExitInstallUnexpectedError    = app.ExitUnexpectedError
 )

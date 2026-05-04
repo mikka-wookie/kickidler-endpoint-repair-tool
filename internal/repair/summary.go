@@ -3,8 +3,10 @@ package repair
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"kigrepair/internal/detector"
+	"kigrepair/internal/reports"
 )
 
 func FormatPreflight(report detector.DetectionReport, decision Decision, reportDir string) string {
@@ -19,6 +21,13 @@ func FormatPreflight(report detector.DetectionReport, decision Decision, reportD
 	b.WriteString("- Ensure Defender exclusion: " + yesNo(decision.DefenderNeeded) + "\n")
 	b.WriteString("- Final verification: yes\n\n")
 	return b.String()
+}
+
+func finishedOrNow(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Now()
+	}
+	return value
 }
 
 func FormatSummary(result RepairResult, final *detector.DetectionReport) string {
@@ -71,7 +80,37 @@ func FormatSummary(result RepairResult, final *detector.DetectionReport) string 
 	b.WriteString("Report:\n")
 	b.WriteString(result.ReportDir)
 	b.WriteString("\n")
-	return b.String()
+	finalHealth := result.FinalHealth
+	installMode := result.FinalInstallMode
+	installRoot := result.FinalInstallRoot
+	primaryService := ""
+	if final != nil {
+		finalHealth = string(final.Health)
+		installMode = string(final.InstallMode)
+		installRoot = final.InstallRoot
+		primaryService = final.PrimaryService
+	}
+	return reports.FormatSummary(reports.SummaryData{
+		Command:        "repair",
+		Started:        result.StartedAt,
+		Finished:       finishedOrNow(result.FinishedAt),
+		Mode:           result.Mode,
+		ExitCode:       result.ExitCode,
+		ReportDir:      result.ReportDir,
+		InitialHealth:  result.InitialHealth,
+		FinalHealth:    finalHealth,
+		InstallMode:    installMode,
+		InstallRoot:    installRoot,
+		PrimaryService: primaryService,
+		Warnings:       result.Warnings,
+		Errors:         result.Errors,
+		Actions: []string{
+			"Cleanup: " + executedStatus(result.CleanupExecuted, result.CleanupNeeded),
+			"Install: " + executedStatus(result.InstallExecuted, result.InstallExecuted),
+			"Defender exclusion: " + executedStatus(result.DefenderExecuted, result.DefenderExecuted),
+			"Final verification: " + finalVerificationStatus(result.ExitCode),
+		},
+	}, b.String())
 }
 
 func yesNo(value bool) string {

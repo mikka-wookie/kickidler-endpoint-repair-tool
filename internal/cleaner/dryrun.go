@@ -2,11 +2,14 @@ package cleaner
 
 import (
 	"strings"
+	"time"
 
+	"kigrepair/internal/app"
 	"kigrepair/internal/detector"
+	"kigrepair/internal/reports"
 )
 
-func FormatDryRunSummary(report detector.DetectionReport, plan CleanupPlan, reportDir string) string {
+func FormatDryRunSummary(report detector.DetectionReport, plan CleanupPlan, ctx *app.AppContext) string {
 	var b strings.Builder
 	b.WriteString("Kigrepair Cleanup Dry Run\n\n")
 	b.WriteString("Health before cleanup: " + string(report.Health) + "\n")
@@ -41,9 +44,33 @@ func FormatDryRunSummary(report detector.DetectionReport, plan CleanupPlan, repo
 
 	b.WriteString("No changes were made.\n\n")
 	b.WriteString("Report:\n")
-	b.WriteString(reportDir)
+	b.WriteString(ctx.OutputDir)
 	b.WriteString("\n")
-	return b.String()
+	return reports.FormatSummary(reports.SummaryData{
+		Command:       "cleanup --dry-run",
+		Started:       ctx.StartedAt,
+		Finished:      time.Now(),
+		Mode:          string(ctx.Mode),
+		ExitCode:      ctx.ExitCode,
+		ReportDir:     ctx.OutputDir,
+		InitialHealth: string(report.Health),
+		InstallMode:   string(report.InstallMode),
+		InstallRoot:   report.InstallRoot,
+		Warnings:      plan.Warnings,
+		Errors:        plan.Blockers,
+		Actions:       dryRunActions(plan),
+	}, b.String())
+}
+
+func dryRunActions(plan CleanupPlan) []string {
+	if len(plan.Actions) == 0 {
+		return []string{"No cleanup actions were required"}
+	}
+	actions := make([]string, 0, len(plan.Actions))
+	for _, action := range plan.Actions {
+		actions = append(actions, "Would "+actionPhrase(action.Type)+": "+action.Target)
+	}
+	return actions
 }
 
 func actionPhrase(actionType CleanupActionType) string {
