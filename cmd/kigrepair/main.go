@@ -56,7 +56,7 @@ func main() {
 	rootCmd.AddCommand(installCommand(opts))
 	rootCmd.AddCommand(defenderCommand(opts))
 	rootCmd.AddCommand(collectReportCommand(opts))
-	rootCmd.AddCommand(versionCommand())
+	rootCmd.AddCommand(versionCommand(opts))
 
 	if err := rootCmd.Execute(); err != nil {
 		var exitErr app.ExitError
@@ -208,12 +208,41 @@ func runWorkflowWithAdmin(cmd *cobra.Command, opts *globalOptions, commandName s
 	return runWorkflow(opts, workflow)
 }
 
-func versionCommand() *cobra.Command {
+type versionInfo struct {
+	AppName   string `json:"app_name"`
+	Version   string `json:"version"`
+	GitCommit string `json:"git_commit"`
+	BuildDate string `json:"build_date"`
+	GOOS      string `json:"goos"`
+	GOARCH    string `json:"goarch"`
+}
+
+func versionCommand(opts *globalOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print version",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("%s %s\n", config.BinaryName, config.Version)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			info := versionInfo{
+				AppName:   config.AppName,
+				Version:   config.Version,
+				GitCommit: config.GitCommit,
+				BuildDate: config.BuildDate,
+				GOOS:      config.TargetOS,
+				GOARCH:    config.TargetArch,
+			}
+			if opts.jsonOutput {
+				encoded, err := json.MarshalIndent(info, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), string(encoded))
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", info.AppName, info.Version)
+			fmt.Fprintf(cmd.OutOrStdout(), "Commit: %s\n", info.GitCommit)
+			fmt.Fprintf(cmd.OutOrStdout(), "Build date: %s\n", info.BuildDate)
+			fmt.Fprintf(cmd.OutOrStdout(), "Target: %s/%s\n", info.GOOS, info.GOARCH)
+			return nil
 		},
 	}
 }
