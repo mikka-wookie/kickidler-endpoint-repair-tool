@@ -30,12 +30,24 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 	if w.Detect != nil {
 		detect = w.Detect
 	}
+	ctx.Logger.Info("detection start")
 	final := detect()
-	ctx.Logger.Info("verification detection health/mode/root: %s / %s / %s", final.Health, final.InstallMode, final.InstallRoot)
-	if err := ctx.Reporter.WriteJSON("final-detection", final); err != nil {
+	ctx.Logger.Info("detection end: health/mode/root: %s / %s / %s", final.Health, final.InstallMode, final.InstallRoot)
+	detectionOperation := app.OperationResult{
+		Step:      "verify.detection",
+		Target:    "grabber",
+		Status:    detectionOperationStatus(final),
+		Message:   "Detection completed with health: " + string(final.Health),
+		Timestamp: time.Now(),
+	}
+	ctx.AddResult(detectionOperation)
+	logging.LogOperation(ctx.Logger, detectionOperation)
+	if err := ctx.Reporter.WriteJSON("initial-detection", final); err != nil {
 		return err
 	}
+	ctx.Logger.Info("wrote initial-detection.json")
 
+	ctx.Logger.Info("verification start")
 	result := Verify(final, Options{InstallExecuted: w.InstallExecuted, MSIInstallLog: w.MSIInstallLog})
 	result.Command = "verify"
 	result.StartedAt = startedAt
@@ -43,8 +55,13 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 	result.Mode = string(ctx.Mode)
 	result.ReportDir = ctx.OutputDir
 	result.ExitCode = ExitCode(result.Status)
+	result.Health = string(final.Health)
+	result.InstallMode = string(final.InstallMode)
+	result.InstallRoot = final.InstallRoot
+	result.PrimaryService = final.PrimaryService
 	ctx.ExitCode = result.ExitCode
 	ctx.JSONValue = result
+	ctx.Logger.Info("verification end: status=%s", result.Status)
 
 	operation := app.OperationResult{
 		Step:      "verify.final",
@@ -60,15 +77,20 @@ func (w VerifyWorkflow) Run(ctx *app.AppContext) error {
 	if err := ctx.Reporter.WriteJSON("verification-result", result); err != nil {
 		return err
 	}
+	ctx.Logger.Info("wrote verification-result.json")
 	if err := ctx.Reporter.WriteOperations(ctx.Results); err != nil {
 		return err
 	}
+	ctx.Logger.Info("wrote operations.json")
 	summary := FormatSummary(result)
 	if err := ctx.Reporter.WriteText("summary", summary); err != nil {
 		return err
 	}
+	ctx.Logger.Info("wrote summary.txt")
+	ctx.Logger.Info("final status: %s", result.Status)
+	ctx.Logger.Info("final exit code: %d", ctx.ExitCode)
 	if !ctx.Quiet && !ctx.JSONOutput {
-		fmt.Print(summary)
+		fmt.Print(FormatConsoleSummary(result))
 	}
 	return nil
 }
@@ -92,5 +114,16 @@ func operationStatus(status VerificationStatus) app.OperationStatus {
 		return app.OperationStatusWarning
 	default:
 		return app.OperationStatusFailed
+	}
+}
+
+func detectionOperationStatus(report detector.DetectionReport) app.OperationStatus {
+	switch report.Health {
+	case detector.GrabberHealthHealthy:
+		return app.OperationStatusSuccess
+	case detector.GrabberHealthUnknown:
+		return app.OperationStatusFailed
+	default:
+		return app.OperationStatusWarning
 	}
 }

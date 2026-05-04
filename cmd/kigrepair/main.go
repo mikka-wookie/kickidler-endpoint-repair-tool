@@ -66,7 +66,7 @@ func main() {
 			os.Exit(exitErr.Code)
 		}
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(app.ExitUnexpectedError)
 	}
 }
 
@@ -163,7 +163,7 @@ func collectReportCommand(opts *globalOptions) *cobra.Command {
 func verifyCommand(opts *globalOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "verify",
-		Short: "Verify the current Grabber installation state",
+		Short: "Verifies current Grabber installation state without modifying the system",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkflowWithAdmin(cmd, opts, "verify", false, verifier.VerifyWorkflow{})
 		},
@@ -282,7 +282,7 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	}
 	ctx.Reporter = reporter
 
-	logger, err := logging.New(reports.LogPath(ctx.OutputDir), ctx.Quiet || ctx.JSONOutput)
+	logger, err := logging.New(reports.LogPath(ctx.OutputDir), ctx.Quiet || ctx.JSONOutput || workflow.Name() == "verify")
 	if err != nil {
 		return err
 	}
@@ -303,7 +303,7 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 			return err
 		}
 		fmt.Println(string(encoded))
-	} else if !ctx.Quiet {
+	} else if !ctx.Quiet && workflow.Name() != "verify" {
 		fmt.Printf("Report directory: %s\n", ctx.OutputDir)
 	}
 	if ctx.ExitCode != 0 {

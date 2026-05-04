@@ -19,7 +19,10 @@ func FormatSummary(result VerificationResult) string {
 	b.WriteString("Install root: " + valueOrDash(report.InstallRoot) + "\n")
 	b.WriteString("Primary service: " + valueOrDash(report.PrimaryService) + "\n")
 	b.WriteString("Service status: " + serviceStatus(report) + "\n")
+	b.WriteString("Primary service running: " + yesNo(primaryServiceRunning(report)) + "\n")
 	b.WriteString("Service executable: " + valueOrDash(report.ServiceExecutablePath) + "\n")
+	b.WriteString("Service executable exists: " + yesNo(strings.TrimSpace(report.ServiceExecutablePath) != "" && report.ServiceExecutableExists) + "\n")
+	b.WriteString("Expected process running: " + expectedProcessRunning(result) + "\n")
 	b.WriteString("Defender exclusion: " + defenderExclusionStatus(report) + "\n")
 	b.WriteString(fmt.Sprintf("Exit code: %d\n\n", result.ExitCode))
 	b.WriteString("Checks:\n")
@@ -33,6 +36,8 @@ func FormatSummary(result VerificationResult) string {
 	b.WriteString("\n")
 	writeList(&b, "Warnings", result.Warnings)
 	writeList(&b, "Errors", result.Errors)
+	b.WriteString("Next recommended support action:\n")
+	b.WriteString("- " + nextAction(result) + "\n\n")
 	b.WriteString("Report:\n")
 	b.WriteString(result.ReportDir)
 	b.WriteString("\n")
@@ -52,6 +57,21 @@ func FormatSummary(result VerificationResult) string {
 		Errors:         result.Errors,
 		Actions:        []string{"Verification: " + string(result.Status)},
 	}, b.String())
+}
+
+func FormatConsoleSummary(result VerificationResult) string {
+	report := result.Detection
+	var b strings.Builder
+	b.WriteString("Kigrepair Verify\n\n")
+	b.WriteString("Report directory: " + valueOrDash(result.ReportDir) + "\n")
+	b.WriteString("Detected health: " + string(report.Health) + "\n")
+	b.WriteString("Install mode: " + string(report.InstallMode) + "\n")
+	b.WriteString("Install root: " + valueOrDash(report.InstallRoot) + "\n")
+	b.WriteString("Verification status: " + string(result.Status) + "\n\n")
+	writeNonSuccessChecks(&b, result)
+	b.WriteString("Suggested next action:\n")
+	b.WriteString("- " + nextAction(result) + "\n")
+	return b.String()
 }
 
 func finishedOrNow(value time.Time) time.Time {
@@ -98,6 +118,59 @@ func defenderExclusionStatus(report detector.DetectionReport) string {
 	return "-"
 }
 
+func primaryServiceRunning(report detector.DetectionReport) bool {
+	for _, service := range report.Services {
+		if strings.EqualFold(service.Name, report.PrimaryService) {
+			return strings.EqualFold(service.Status, "running")
+		}
+	}
+	return false
+}
+
+func expectedProcessRunning(result VerificationResult) string {
+	for _, check := range result.Checks {
+		if check.Name == "expected_grabber_process_running" {
+			switch check.Status {
+			case CheckSuccess:
+				return "yes"
+			case CheckSkipped:
+				return "not checked"
+			case CheckWarning:
+				return "not detected"
+			default:
+				return "no"
+			}
+		}
+	}
+	return "not checked"
+}
+
+func nextAction(result VerificationResult) string {
+	switch result.Detection.Health {
+	case detector.GrabberHealthHealthy:
+		if result.Status != VerificationFailed {
+			return "No repair required."
+		}
+	case detector.GrabberHealthBroken, detector.GrabberHealthPartiallyRemoved:
+		return "Run repair with a valid installer and invite."
+	case detector.GrabberHealthNotInstalled:
+		return "Install Grabber or run repair with installer and invite, depending on support case."
+	case detector.GrabberHealthUnknown:
+		return "Review detection and verification JSON files."
+	}
+	if result.Status == VerificationFailed {
+		return "Run repair with a valid installer and invite."
+	}
+	return "Review detection and verification JSON files."
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
+}
+
 func writeList(b *strings.Builder, name string, values []string) {
 	if len(values) == 0 {
 		b.WriteString(name + ":\n- none\n\n")
@@ -108,6 +181,29 @@ func writeList(b *strings.Builder, name string, values []string) {
 		b.WriteString("- " + value + "\n")
 	}
 	b.WriteString("\n")
+}
+
+func writeNonSuccessChecks(b *strings.Builder, result VerificationResult) {
+	wrote := false
+	for _, check := range result.Checks {
+		if check.Status != CheckFailed && check.Status != CheckWarning {
+			continue
+		}
+		if !wrote {
+			b.WriteString("Failed/warning checks:\n")
+			wrote = true
+		}
+		b.WriteString("- " + check.Name + ": " + string(check.Status))
+		if strings.TrimSpace(check.Message) != "" {
+			b.WriteString(" (" + check.Message + ")")
+		}
+		b.WriteString("\n")
+	}
+	if wrote {
+		b.WriteString("\n")
+		return
+	}
+	b.WriteString("Failed/warning checks:\n- none\n\n")
 }
 
 func unique(values []string) []string {

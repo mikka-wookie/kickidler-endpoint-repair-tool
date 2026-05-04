@@ -45,6 +45,10 @@ type VerificationResult struct {
 	ExitCode        int                      `json:"exit_code"`
 	Status          VerificationStatus       `json:"status"`
 	Message         string                   `json:"message"`
+	Health          string                   `json:"health,omitempty"`
+	InstallMode     string                   `json:"install_mode,omitempty"`
+	InstallRoot     string                   `json:"install_root,omitempty"`
+	PrimaryService  string                   `json:"primary_service,omitempty"`
 	Warnings        []string                 `json:"warnings,omitempty"`
 	Errors          []string                 `json:"errors,omitempty"`
 	Checks          []VerificationCheck      `json:"checks"`
