@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"kigrepair/internal/checks"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/rollback"
 	"kigrepair/internal/verifier"
 )
 
@@ -110,6 +112,17 @@ func (w InstallWorkflow) Run(ctx *app.AppContext) error {
 	ctx.AddResult(initialResult)
 	logging.LogOperation(ctx.Logger, initialResult)
 
+	rollbackInfo, err := createInstallRollback(ctx, initial, installerPath, result.InviteProvided, admin)
+	if err != nil {
+		return w.finishEarly(ctx, result, ExitInstallUnexpectedError, "rollback.snapshot_capture", rollback.Path(ctx.OutputDir), "Rollback snapshot failed", err)
+	}
+	result.Rollback = ptrRollbackSummary(rollback.SummaryFromInfo(rollback.Path(ctx.OutputDir), rollbackInfo))
+	if !ctx.Quiet && !ctx.JSONOutput {
+		fmt.Println("Rollback snapshot: created")
+		fmt.Println("Snapshot file: " + rollback.Path(ctx.OutputDir))
+		fmt.Println("Restore supported: no")
+	}
+
 	msiLogPath := filepath.Join(ctx.OutputDir, "msi-install.log")
 	executor := w.Executor
 	if executor == nil {
@@ -140,6 +153,13 @@ func (w InstallWorkflow) Run(ctx *app.AppContext) error {
 	}
 	ctx.AddResult(msiOperation)
 	logging.LogOperation(ctx.Logger, msiOperation)
+	rollback.RecordExecutedChange(rollback.NewLedger(rollbackInfo), rollback.ExecutedChangeFromOperation(msiOperation, rollbackInfo.PlannedChanges))
+	result.Rollback = ptrRollbackSummary(rollback.SummaryFromInfo(rollback.Path(ctx.OutputDir), rollbackInfo))
+	addRollbackOperation(ctx, "rollback.executed_changes_recorded", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback executed changes recorded", "")
+	if err := rollback.WriteFile(ctx.OutputDir, rollbackInfo); err != nil {
+		return err
+	}
+	addRollbackOperation(ctx, "rollback.info_written", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback info written", "")
 
 	final := detect()
 	result.FinalHealth = string(final.Health)
@@ -190,6 +210,55 @@ func (w InstallWorkflow) Run(ctx *app.AppContext) error {
 		fmt.Print(summary)
 	}
 	return nil
+}
+
+func createInstallRollback(ctx *app.AppContext, initial detector.DetectionReport, installerPath string, hasInvite bool, isAdmin bool) (*rollback.RollbackInfo, error) {
+	planned := []rollback.PlannedChange{{
+		ID:          "install-001",
+		Type:        rollback.TypeMSIInstall,
+		Target:      installerPath,
+		Destructive: true,
+		Reason:      "Install workflow runs MSI installation",
+		Source:      rollback.WorkflowInstall,
+	}}
+	info, err := rollback.CaptureSnapshot(context.Background(), rollback.SnapshotInput{
+		ReportDir:      ctx.OutputDir,
+		Workflow:       rollback.WorkflowInstall,
+		Detection:      &initial,
+		InstallerPath:  installerPath,
+		HasInvite:      hasInvite,
+		IsAdmin:        isAdmin,
+		RequiredPaths:  initial.RequiredDefenderPaths,
+		PlannedChanges: planned,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := rollback.WriteFile(ctx.OutputDir, info); err != nil {
+		return nil, err
+	}
+	addRollbackOperation(ctx, "rollback.snapshot_capture", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback snapshot captured", "")
+	addRollbackOperation(ctx, "rollback.planned_changes_recorded", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback planned changes recorded", "")
+	addRollbackOperation(ctx, "rollback.info_written", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback info written", "")
+	ctx.Logger.Info("rollback snapshot created: %s", rollback.Path(ctx.OutputDir))
+	return info, nil
+}
+
+func addRollbackOperation(ctx *app.AppContext, step string, target string, status app.OperationStatus, message string, errText string) {
+	result := app.OperationResult{
+		Step:      step,
+		Target:    target,
+		Status:    status,
+		Message:   message,
+		Error:     errText,
+		Timestamp: time.Now(),
+	}
+	ctx.AddResult(result)
+	logging.LogOperation(ctx.Logger, result)
+}
+
+func ptrRollbackSummary(summary rollback.Summary) *rollback.Summary {
+	return &summary
 }
 
 func shortOutput(output string) string {

@@ -1,6 +1,7 @@
 package cleaner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"kigrepair/internal/checks"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/rollback"
 )
 
 type CleanupWorkflow struct {
@@ -173,7 +175,7 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 			ExitCode:         ctx.ExitCode,
 			ReportDir:        ctx.OutputDir,
 		}
-		summary := FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx)
+		summary := FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx, nil)
 		_ = ctx.Reporter.WriteText("summary", summary)
 		_ = ctx.Reporter.WriteOperations(ctx.Results)
 		if !ctx.Quiet && !ctx.JSONOutput {
@@ -206,7 +208,7 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 			ReportDir:        ctx.OutputDir,
 		}
 		_ = ctx.Reporter.WriteOperations(ctx.Results)
-		_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx))
+		_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx, nil))
 		return nil
 	}
 
@@ -234,7 +236,7 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 			ReportDir:        ctx.OutputDir,
 		}
 		_ = ctx.Reporter.WriteOperations(ctx.Results)
-		_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx))
+		_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx, nil))
 		return nil
 	}
 
@@ -269,16 +271,62 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 				ReportDir:        ctx.OutputDir,
 			}
 			_ = ctx.Reporter.WriteOperations(ctx.Results)
-			_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx))
+			_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx, nil))
 			return nil
 		}
 		ctx.Logger.Info("confirmation status: accepted")
 	}
 
+	rollbackInfo, err := createCleanupRollback(ctx, initial, plan)
+	if err != nil {
+		ctx.ExitCode = app.ExitUnexpectedError
+		message := "Rollback snapshot failed"
+		result := app.OperationResult{
+			Step:      "rollback.snapshot_capture",
+			Target:    rollback.Path(ctx.OutputDir),
+			Status:    app.OperationStatusFailed,
+			Message:   message,
+			Error:     err.Error(),
+			Timestamp: time.Now(),
+		}
+		ctx.AddResult(result)
+		logging.LogOperation(ctx.Logger, result)
+		ctx.Logger.Error("rollback snapshot failed: %s", err)
+		if !ctx.Quiet && !ctx.JSONOutput {
+			fmt.Fprintln(os.Stderr, "Rollback snapshot: failed")
+			fmt.Fprintln(os.Stderr, "No system changes were made.")
+			fmt.Fprintln(os.Stderr, "Reason: could not write rollback-info.json")
+		}
+		ctx.JSONValue = CleanupExecutionResult{
+			InitialDetection: initial,
+			CleanupPlan:      plan,
+			Operations:       ctx.Results,
+			ExitCode:         ctx.ExitCode,
+			ReportDir:        ctx.OutputDir,
+		}
+		_ = ctx.Reporter.WriteOperations(ctx.Results)
+		_ = ctx.Reporter.WriteText("summary", FormatRealCleanupSummary(initial, nil, plan, ctx.Results, ctx, nil))
+		return nil
+	}
+	if !ctx.Quiet && !ctx.JSONOutput {
+		fmt.Println("Rollback snapshot: created")
+		fmt.Println("Snapshot file: " + rollback.Path(ctx.OutputDir))
+		fmt.Println("Restore supported: no")
+	}
+
 	executor := NewExecutor(ctx.OutputDir, ctx.Logger)
+	executionStart := len(ctx.Results)
 	for _, result := range executor.ExecutePlan(plan) {
 		ctx.AddResult(result)
 	}
+	for _, change := range RollbackExecutedChanges(ctx.Results[executionStart:], rollbackInfo.PlannedChanges) {
+		rollback.RecordExecutedChange(rollback.NewLedger(rollbackInfo), change)
+	}
+	addRollbackOperation(ctx, "rollback.executed_changes_recorded", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback executed changes recorded", "")
+	if err := rollback.WriteFile(ctx.OutputDir, rollbackInfo); err != nil {
+		return err
+	}
+	addRollbackOperation(ctx, "rollback.info_written", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback info written", "")
 
 	final := detector.Detect()
 	ctx.Logger.Info("final health: %s", final.Health)
@@ -293,10 +341,14 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 		CleanupPlan:      plan,
 		Operations:       ctx.Results,
 		FinalDetection:   &final,
+		Rollback:         rollback.SummaryFromInfo(rollback.Path(ctx.OutputDir), rollbackInfo),
 		ExitCode:         ctx.ExitCode,
 		ReportDir:        ctx.OutputDir,
 	}
-	summary := FormatRealCleanupSummary(initial, &final, plan, ctx.Results, ctx)
+	if err := ctx.Reporter.WriteJSON("cleanup-result", ctx.JSONValue); err != nil {
+		return err
+	}
+	summary := FormatRealCleanupSummary(initial, &final, plan, ctx.Results, ctx, rollbackInfo)
 	if err := ctx.Reporter.WriteOperations(ctx.Results); err != nil {
 		return err
 	}
@@ -314,6 +366,7 @@ type CleanupExecutionResult struct {
 	CleanupPlan      CleanupPlan               `json:"cleanup_plan"`
 	Operations       []app.OperationResult     `json:"operations"`
 	FinalDetection   *detector.DetectionReport `json:"final_detection,omitempty"`
+	Rollback         rollback.Summary          `json:"rollback,omitempty"`
 	ExitCode         int                       `json:"exit_code"`
 	ReportDir        string                    `json:"report_dir"`
 }
@@ -327,6 +380,44 @@ type CleanupPlanResult struct {
 	ReportDir        string                   `json:"report_dir"`
 	Warnings         []string                 `json:"warnings"`
 	Errors           []string                 `json:"errors"`
+}
+
+func createCleanupRollback(ctx *app.AppContext, initial detector.DetectionReport, plan CleanupPlan) (*rollback.RollbackInfo, error) {
+	planned := RollbackPlannedChanges(plan, rollback.WorkflowCleanup)
+	info, err := rollback.CaptureSnapshot(context.Background(), rollback.SnapshotInput{
+		ReportDir:      ctx.OutputDir,
+		Workflow:       rollback.WorkflowCleanup,
+		Detection:      &initial,
+		IsAdmin:        initial.IsAdmin,
+		FileTargets:    RollbackFileTargets(plan),
+		RegistryKeys:   RollbackRegistryTargets(plan),
+		RequiredPaths:  initial.RequiredDefenderPaths,
+		PlannedChanges: planned,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := rollback.WriteFile(ctx.OutputDir, info); err != nil {
+		return nil, err
+	}
+	addRollbackOperation(ctx, "rollback.snapshot_capture", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback snapshot captured", "")
+	addRollbackOperation(ctx, "rollback.planned_changes_recorded", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback planned changes recorded", "")
+	addRollbackOperation(ctx, "rollback.info_written", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback info written", "")
+	ctx.Logger.Info("rollback snapshot created: %s", rollback.Path(ctx.OutputDir))
+	return info, nil
+}
+
+func addRollbackOperation(ctx *app.AppContext, step string, target string, status app.OperationStatus, message string, errText string) {
+	result := app.OperationResult{
+		Step:      step,
+		Target:    target,
+		Status:    status,
+		Message:   message,
+		Error:     errText,
+		Timestamp: time.Now(),
+	}
+	ctx.AddResult(result)
+	logging.LogOperation(ctx.Logger, result)
 }
 
 func hasUnsafeAction(plan CleanupPlan) bool {

@@ -8,6 +8,7 @@ import (
 	"kigrepair/internal/app"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/reports"
+	"kigrepair/internal/rollback"
 )
 
 func FormatRealCleanupPreflight(report detector.DetectionReport, plan CleanupPlan, reportDir string) string {
@@ -21,7 +22,7 @@ func FormatRealCleanupPreflight(report detector.DetectionReport, plan CleanupPla
 	return b.String()
 }
 
-func FormatRealCleanupSummary(initial detector.DetectionReport, final *detector.DetectionReport, plan CleanupPlan, results []app.OperationResult, ctx *app.AppContext) string {
+func FormatRealCleanupSummary(initial detector.DetectionReport, final *detector.DetectionReport, plan CleanupPlan, results []app.OperationResult, ctx *app.AppContext, rollbackInfo *rollback.RollbackInfo) string {
 	var b strings.Builder
 	b.WriteString("Kigrepair Cleanup\n\n")
 	b.WriteString("Initial health: " + string(initial.Health) + "\n")
@@ -62,6 +63,10 @@ func FormatRealCleanupSummary(initial detector.DetectionReport, final *detector.
 	b.WriteString("Report:\n")
 	b.WriteString(ctx.OutputDir)
 	b.WriteString("\n")
+	if rollbackInfo != nil {
+		b.WriteString("\n")
+		b.WriteString(rollback.FormatSummarySection(rollbackInfo))
+	}
 	finalHealth := ""
 	installMode := string(initial.InstallMode)
 	installRoot := initial.InstallRoot

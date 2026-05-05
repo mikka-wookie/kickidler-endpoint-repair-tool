@@ -114,6 +114,17 @@ func FormatSummary(result RepairResult, final *detector.DetectionReport) string 
 	b.WriteString("Report:\n")
 	b.WriteString(result.ReportDir)
 	b.WriteString("\n")
+	if result.Rollback != nil && result.Rollback.SnapshotCreated {
+		b.WriteString("\n")
+		b.WriteString("Rollback / Change Snapshot\n")
+		b.WriteString("--------------------------\n")
+		b.WriteString("Snapshot file: rollback-info.json\n")
+		b.WriteString("Restore supported: no\n")
+		b.WriteString(fmt.Sprintf("Planned changes: %d\n", result.Rollback.PlannedChanges))
+		b.WriteString(fmt.Sprintf("Executed changes: %d\n\n", result.Rollback.ExecutedChanges))
+		b.WriteString("Note:\n")
+		b.WriteString("Automatic rollback is not supported in this version. This snapshot is for audit and support escalation.\n\n")
+	}
 	finalHealth := result.FinalHealth
 	installMode := result.FinalInstallMode
 	installRoot := result.FinalInstallRoot
