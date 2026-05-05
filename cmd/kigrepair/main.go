@@ -60,6 +60,7 @@ func main() {
 	rootCmd.AddCommand(installCommand(opts))
 	rootCmd.AddCommand(defenderCommand(opts))
 	rootCmd.AddCommand(collectReportCommand(opts))
+	rootCmd.AddCommand(reportsCommand(opts))
 	rootCmd.AddCommand(verifyCommand(opts))
 	rootCmd.AddCommand(versionCommand(opts))
 
@@ -165,6 +166,77 @@ func collectReportCommand(opts *globalOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&includeHistory, "include-history", true, "include recent kigrepair report artifacts")
 	cmd.Flags().IntVar(&historyLimit, "history-limit", 5, "number of previous report folders to include")
 	cmd.Flags().BoolVar(&noZip, "no-zip", false, "skip creating kigrepair-support-bundle.zip")
+	return cmd
+}
+
+func reportsCommand(opts *globalOptions) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "reports",
+		Short: "List and safely clean kigrepair report directories",
+	}
+	cmd.AddCommand(reportsListCommand(opts))
+	cmd.AddCommand(reportsCleanupCommand(opts))
+	return cmd
+}
+
+func reportsListCommand(opts *globalOptions) *cobra.Command {
+	var limit int
+	var all bool
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List kigrepair report directories",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := reportRootFromOptions(opts)
+			result, err := reports.ListReports(root, reports.ReportListOptions{Limit: limit, All: all})
+			exitCode := app.ExitSuccess
+			if len(result.Warnings) > 0 {
+				exitCode = app.ExitWarnings
+			}
+			if err != nil {
+				exitCode = app.ExitUnexpectedError
+			}
+			if opts.jsonOutput {
+				encoder := json.NewEncoder(cmd.OutOrStdout())
+				encoder.SetIndent("", "  ")
+				encoder.SetEscapeHTML(false)
+				if encodeErr := encoder.Encode(result); encodeErr != nil {
+					return encodeErr
+				}
+			} else if !opts.quiet {
+				fmt.Fprint(cmd.OutOrStdout(), reports.FormatReportList(result))
+			}
+			if exitCode != app.ExitSuccess {
+				return app.ExitError{Code: exitCode}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 0, "maximum number of reports to display")
+	cmd.Flags().BoolVar(&all, "all", false, "show all reports when a limit is configured")
+	return cmd
+}
+
+func reportsCleanupCommand(opts *globalOptions) *cobra.Command {
+	var olderThan string
+	var keepLast int
+	var dryRun bool
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "cleanup",
+		Short: "Safely clean old kigrepair report directories",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runReportWorkflow(opts, reports.CleanupReportsWorkflow{
+				OlderThan: olderThan,
+				KeepLast:  keepLast,
+				DryRun:    dryRun,
+				Yes:       yes,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&olderThan, "older-than", reports.DefaultRetentionOlderThan, "delete reports older than this duration after keep-last is applied")
+	cmd.Flags().IntVar(&keepLast, "keep-last", reports.DefaultRetentionKeepLast, "always keep the newest N report directories")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "create a cleanup plan without deleting reports")
+	cmd.Flags().BoolVar(&yes, "yes", false, "execute the validated report cleanup plan")
 	return cmd
 }
 
@@ -338,4 +410,76 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 		return app.ExitError{Code: ctx.ExitCode}
 	}
 	return nil
+}
+
+func runReportWorkflow(opts *globalOptions, workflow app.Workflow) error {
+	ctx := app.NewContext()
+	ctx.StartedAt = time.Now()
+	ctx.ReportRoot = reportRootFromOptions(opts)
+	ctx.OutputDir = uniqueTimestampedReportDir(ctx.ReportRoot, ctx.StartedAt)
+	ctx.Quiet = opts.quiet
+	ctx.NonInteractive = opts.nonInteractive
+	ctx.Force = opts.force
+	ctx.JSONOutput = opts.jsonOutput
+	if opts.quiet {
+		ctx.Mode = app.RunModeQuiet
+	}
+
+	reporter, err := reports.New(ctx.OutputDir)
+	if err != nil {
+		return err
+	}
+	ctx.Reporter = reporter
+
+	suppressConsoleLog := ctx.Quiet || ctx.JSONOutput
+	logger, err := logging.New(reports.LogPath(ctx.OutputDir), suppressConsoleLog)
+	if err != nil {
+		return err
+	}
+	defer logger.Close()
+	ctx.Logger = logger
+
+	if err := app.RunWorkflow(ctx, workflow); err != nil {
+		return err
+	}
+
+	if ctx.JSONOutput {
+		value := any(ctx.Results)
+		if ctx.JSONValue != nil {
+			value = ctx.JSONValue
+		}
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		encoder.SetEscapeHTML(false)
+		if err := encoder.Encode(value); err != nil {
+			return err
+		}
+	} else if !ctx.Quiet {
+		fmt.Printf("Report directory: %s\n", ctx.OutputDir)
+	}
+	if ctx.ExitCode != 0 {
+		return app.ExitError{Code: ctx.ExitCode}
+	}
+	return nil
+}
+
+func reportRootFromOptions(opts *globalOptions) string {
+	if strings.TrimSpace(opts.output) != "" {
+		return opts.output
+	}
+	return config.DefaultReportRoot
+}
+
+func uniqueTimestampedReportDir(root string, startedAt time.Time) string {
+	base := reports.TimestampedDir(root, startedAt)
+	if _, err := os.Stat(base); os.IsNotExist(err) {
+		return base
+	}
+	for i := 1; i < 100; i++ {
+		candidate := fmt.Sprintf("%s-%02d", base, i)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+	return fmt.Sprintf("%s-%d", base, startedAt.UnixNano())
 }
