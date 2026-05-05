@@ -24,6 +24,7 @@ import (
 	"kigrepair/internal/verifier"
 	"kigrepair/internal/version"
 	"kigrepair/internal/winapi"
+	"kigrepair/internal/wizard"
 )
 
 type globalOptions struct {
@@ -63,6 +64,7 @@ func main() {
 	rootCmd.AddCommand(collectReportCommand(opts))
 	rootCmd.AddCommand(reportsCommand(opts))
 	rootCmd.AddCommand(verifyCommand(opts))
+	rootCmd.AddCommand(wizardCommand(opts))
 	rootCmd.AddCommand(versionCommand(opts))
 
 	if err := rootCmd.Execute(); err != nil {
@@ -73,6 +75,42 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(app.ExitUnexpectedError)
 	}
+}
+
+func wizardCommand(opts *globalOptions) *cobra.Command {
+	var invite string
+	var installerPath string
+	var collectBundle bool
+	var allowRepair bool
+	var verifyOnly bool
+	var yes bool
+	cmd := &cobra.Command{
+		Use:     "wizard",
+		Aliases: []string{"support"},
+		Short:   "Run an interactive support wizard",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflow(opts, wizard.Workflow{Options: wizard.Options{
+				InstallerPath:  installerPath,
+				HasInvite:      strings.TrimSpace(invite) != "",
+				InviteValue:    invite,
+				OutputDir:      opts.output,
+				JSON:           opts.jsonOutput,
+				Quiet:          opts.quiet,
+				NonInteractive: opts.nonInteractive,
+				CollectBundle:  collectBundle,
+				AllowRepair:    allowRepair,
+				VerifyOnly:     verifyOnly,
+				Yes:            yes,
+			}})
+		},
+	}
+	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
+	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
+	cmd.Flags().BoolVar(&collectBundle, "collect-bundle", false, "collect support bundle at the end")
+	cmd.Flags().BoolVar(&allowRepair, "repair", false, "allow real repair after readiness checks and confirmation")
+	cmd.Flags().BoolVar(&verifyOnly, "verify-only", false, "run read-only detection, recommendation, and verification only")
+	cmd.Flags().BoolVar(&yes, "yes", false, "allow non-interactive repair when used with --repair")
+	return cmd
 }
 
 func repairCommand(opts *globalOptions) *cobra.Command {
