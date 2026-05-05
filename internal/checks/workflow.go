@@ -122,6 +122,7 @@ func FormatSummary(report detector.DetectionReport, classification classifier.Cl
 	b.WriteString("Service status: " + serviceStatus(report) + "\n")
 	b.WriteString("Service executable: " + valueOrDash(report.ServiceExecutablePath) + "\n")
 	b.WriteString("Defender exclusion: " + defenderExclusionStatus(report) + "\n\n")
+	b.WriteString("Processes: " + processStatusLine(report) + "\n\n")
 	if coveredBy := defenderCoveredBy(report); coveredBy != "" {
 		b.WriteString("Covered by: " + coveredBy + "\n\n")
 	}
@@ -161,6 +162,21 @@ func FormatSummary(report detector.DetectionReport, classification classifier.Cl
 		Errors:         report.Issues,
 		Actions:        []string{"Detection completed with health: " + string(report.Health)},
 	}, b.String()+recommendations.FormatSection(recommendation))
+}
+
+func processStatusLine(report detector.DetectionReport) string {
+	trusted := 0
+	skipped := 0
+	for _, process := range report.Processes {
+		if detector.TrustedProcessForTermination(process) {
+			trusted++
+			continue
+		}
+		if len(process.Warnings) > 0 || process.TrustLevel == detector.ProcessTrustPathMismatch || process.TrustLevel == detector.ProcessTrustPathUnavailable {
+			skipped++
+		}
+	}
+	return fmt.Sprintf("%d trusted Grabber processes detected, %d skipped unsafe name match.", trusted, skipped)
 }
 
 func ptr[T any](value T) *T {

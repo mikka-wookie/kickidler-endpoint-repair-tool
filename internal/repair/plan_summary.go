@@ -14,6 +14,7 @@ func FormatDryRunConsole(plan RepairPlan) string {
 	b.WriteString("Repair dry-run: " + plan.Status + "\n")
 	b.WriteString("System changes made: no\n")
 	b.WriteString("Report directory: " + plan.ReportDir + "\n\n")
+	b.WriteString(fmt.Sprintf("Processes: %d trusted Grabber processes would be terminated, %d skipped unsafe name match.\n\n", plan.Cleanup.ProcessTerminateCount, plan.Cleanup.ProcessSkippedCount))
 	if plan.ReadyForRepair {
 		b.WriteString("Real repair is ready to run.\n\n")
 	} else {
@@ -71,6 +72,7 @@ func FormatDryRunSummary(plan RepairPlan, initial *detector.DetectionReport) str
 	b.WriteString("- Required: " + yesNo(plan.Cleanup.Required) + "\n")
 	b.WriteString("- Destructive in real repair: " + yesNo(plan.Cleanup.Destructive) + "\n")
 	b.WriteString(fmt.Sprintf("- Planned actions: %d\n", plan.Cleanup.ActionsCount))
+	b.WriteString(fmt.Sprintf("- Process termination actions: %d trusted, %d skipped unsafe\n", plan.Cleanup.ProcessTerminateCount, plan.Cleanup.ProcessSkippedCount))
 	b.WriteString("- Cleanup plan: cleanup-plan.json\n\n")
 	b.WriteString("Defender:\n")
 	b.WriteString("- Required path: " + valueOrDash(plan.Defender.RequiredPath) + "\n")

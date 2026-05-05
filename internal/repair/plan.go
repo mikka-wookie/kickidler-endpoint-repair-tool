@@ -281,13 +281,15 @@ type RepairPlan struct {
 }
 
 type CleanupPlanSummary struct {
-	Required     bool     `json:"required"`
-	Destructive  bool     `json:"destructive"`
-	PlanPath     string   `json:"plan_path,omitempty"`
-	ActionsCount int      `json:"actions_count"`
-	TargetsCount int      `json:"targets_count"`
-	Actions      []string `json:"actions,omitempty"`
-	WarningCount int      `json:"warning_count"`
+	Required              bool     `json:"required"`
+	Destructive           bool     `json:"destructive"`
+	PlanPath              string   `json:"plan_path,omitempty"`
+	ActionsCount          int      `json:"actions_count"`
+	TargetsCount          int      `json:"targets_count"`
+	ProcessTerminateCount int      `json:"process_terminate_count"`
+	ProcessSkippedCount   int      `json:"process_skipped_count"`
+	Actions               []string `json:"actions,omitempty"`
+	WarningCount          int      `json:"warning_count"`
 }
 
 type DefenderPlanSummary struct {
@@ -448,18 +450,30 @@ func BuildCleanupPlanSummary(plan cleaner.CleanupPlan) CleanupPlanSummary {
 func buildCleanupPlanSummary(plan cleaner.CleanupPlan, required bool) CleanupPlanSummary {
 	actions := make([]string, 0, len(plan.Actions))
 	targets := map[string]bool{}
+	processTerminateCount := 0
 	for _, action := range plan.Actions {
 		actions = append(actions, string(action.Type)+": "+action.Target)
 		targets[action.Target] = true
+		if action.Type == cleaner.CleanupActionKillProcess {
+			processTerminateCount++
+		}
+	}
+	processSkippedCount := 0
+	for _, warning := range plan.Warnings {
+		if strings.Contains(strings.ToLower(warning), "skipped unsafe process") {
+			processSkippedCount++
+		}
 	}
 	return CleanupPlanSummary{
-		Required:     required && len(plan.Actions) > 0,
-		Destructive:  required && len(plan.Actions) > 0,
-		PlanPath:     "cleanup-plan.json",
-		ActionsCount: len(plan.Actions),
-		TargetsCount: len(targets),
-		Actions:      actions,
-		WarningCount: len(plan.Warnings),
+		Required:              required && len(plan.Actions) > 0,
+		Destructive:           required && len(plan.Actions) > 0,
+		PlanPath:              "cleanup-plan.json",
+		ActionsCount:          len(plan.Actions),
+		TargetsCount:          len(targets),
+		ProcessTerminateCount: processTerminateCount,
+		ProcessSkippedCount:   processSkippedCount,
+		Actions:               actions,
+		WarningCount:          len(plan.Warnings),
 	}
 }
 

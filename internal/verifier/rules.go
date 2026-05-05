@@ -82,16 +82,16 @@ func expectedProcessRunning(report detector.DetectionReport) (bool, string) {
 		root = report.BinaryDir
 	}
 	for _, process := range report.Processes {
-		if process.ExecutablePath == "" {
+		if !detector.TrustedProcessForTermination(process) || process.ExecutablePath == "" {
 			continue
 		}
 		if report.InstallMode == detector.InstallModeHiddenWMI {
-			if process.MatchedByExactPath && pathInsideOrEqual(process.ExecutablePath, root) {
+			if process.TrustLevel == detector.ProcessTrustHiddenWMIExactPath && pathInsideOrEqual(process.ExecutablePath, root) {
 				return true, process.Name
 			}
 			continue
 		}
-		if process.MatchedByName && pathInsideOrEqual(process.ExecutablePath, root) {
+		if process.TrustLevel == detector.ProcessTrustNameAndPathMatch && pathInsideOrEqual(process.ExecutablePath, root) {
 			return true, process.Name
 		}
 	}

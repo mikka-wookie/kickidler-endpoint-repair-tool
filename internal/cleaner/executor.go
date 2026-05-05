@@ -36,6 +36,8 @@ type Executor struct {
 	Stat            func(string) (os.FileInfo, error)
 	ValidatePath    func(string) error
 	RegistryBackups bool
+	ProcessTimeout  time.Duration
+	ProcessPoll     time.Duration
 }
 
 func NewExecutor(outputDir string, logger app.Logger) Executor {
@@ -47,6 +49,8 @@ func NewExecutor(outputDir string, logger app.Logger) Executor {
 		Stat:            os.Lstat,
 		ValidatePath:    safety.ValidateCleanupPath,
 		RegistryBackups: true,
+		ProcessTimeout:  10 * time.Second,
+		ProcessPoll:     500 * time.Millisecond,
 	}
 }
 
@@ -138,6 +142,9 @@ func (e Executor) deleteService(action CleanupAction) app.OperationResult {
 func (e Executor) killProcess(action CleanupAction) app.OperationResult {
 	// MVP implementation: uses taskkill.exe by PID. Keep this isolated so it can
 	// later be replaced with native Windows process APIs.
+	if !plannedProcessActionTrusted(action) {
+		return operation(action.Type, action.Target, app.OperationStatusFailed, "Cleanup plan process action is not trusted for termination", action.TrustLevel)
+	}
 	pid := action.PID
 	if pid == 0 {
 		pid = parsePID(action.Target)
@@ -145,17 +152,15 @@ func (e Executor) killProcess(action CleanupAction) app.OperationResult {
 	if pid <= 0 {
 		return operation(action.Type, action.Target, app.OperationStatusFailed, "Cleanup plan does not contain a valid PID", "")
 	}
-	if !processExists(e.RunCommand, pid) {
-		return operation(action.Type, action.Target, app.OperationStatusSkipped, "Process does not exist", "")
+	current, err := currentProcess(e.RunCommand, pid)
+	if err != nil {
+		return operation(action.Type, action.Target, app.OperationStatusFailed, "Could not re-query process before termination", err.Error())
 	}
-	if action.ExecutablePath != "" {
-		currentPath := currentProcessExecutablePath(e.RunCommand, pid)
-		if currentPath != "" && !strings.EqualFold(detector.NormalizeWindowsPath(currentPath), detector.NormalizeWindowsPath(action.ExecutablePath)) {
-			return operation(action.Type, action.Target, app.OperationStatusFailed, "Process executable path no longer matches cleanup plan", currentPath)
-		}
-		if !isKnownGrabberProcessPath(action.ExecutablePath) {
-			return operation(action.Type, action.Target, app.OperationStatusFailed, "Process executable path is not an allowed Grabber path", action.ExecutablePath)
-		}
+	if current == nil {
+		return operation(action.Type, action.Target, app.OperationStatusSkipped, "Process already exited", "")
+	}
+	if err := validateCurrentProcessMatchesPlan(*current, action); err != nil {
+		return operation(action.Type, action.Target, app.OperationStatusFailed, "Process no longer matches cleanup plan", err.Error())
 	}
 	if e.Logger != nil {
 		e.Logger.Info("executing command: taskkill /PID %d /F", pid)
@@ -164,9 +169,16 @@ func (e Executor) killProcess(action CleanupAction) app.OperationResult {
 	result := e.RunCommand("taskkill.exe", "/PID", strconv.Itoa(pid), "/F")
 	e.logCommandResult("taskkill.exe", result, time.Since(started))
 	if result.ExitCode != 0 {
-		return operation(action.Type, action.Target, app.OperationStatusFailed, "Process kill failed", resultError(result))
+		message := "Process termination failed"
+		if strings.Contains(strings.ToLower(result.Output), "access is denied") || strings.Contains(strings.ToLower(result.Output), "access denied") {
+			message = "Process termination failed: run as Administrator"
+		}
+		return operation(action.Type, action.Target, app.OperationStatusFailed, message, resultError(result))
 	}
-	return operation(action.Type, action.Target, app.OperationStatusSuccess, "Process killed", "")
+	if waitErr := e.waitForProcessExit(pid); waitErr != nil {
+		return operation(action.Type, action.Target, app.OperationStatusFailed, "Timed out waiting for process to exit", waitErr.Error())
+	}
+	return operation(action.Type, action.Target, app.OperationStatusSuccess, "Process terminated and verified exited", "")
 }
 
 func (e Executor) uninstallMSI(action CleanupAction) app.OperationResult {
@@ -311,25 +323,82 @@ func serviceState(run CommandRunner, name string) string {
 	return ""
 }
 
-func processExists(run CommandRunner, pid int) bool {
-	// MVP implementation: uses tasklist.exe for PID existence checks. Keep this
-	// isolated so it can later be replaced with native Windows process APIs.
-	result := run("tasklist.exe", "/FI", "PID eq "+strconv.Itoa(pid), "/NH")
-	if result.ExitCode != 0 {
-		return false
-	}
-	return strings.Contains(result.Output, strconv.Itoa(pid))
-}
-
-func currentProcessExecutablePath(run CommandRunner, pid int) string {
+func currentProcess(run CommandRunner, pid int) (*detector.ProcessState, error) {
 	// MVP implementation: uses PowerShell/CIM for process path verification. Keep
 	// this isolated so it can later be replaced with native Windows process APIs.
-	script := fmt.Sprintf(`$p=Get-CimInstance Win32_Process -Filter "ProcessId = %d"; if ($null -ne $p) { $p.ExecutablePath }`, pid)
+	script := fmt.Sprintf(`$p=Get-CimInstance Win32_Process -Filter "ProcessId = %d" | Select-Object ProcessId,Name,ExecutablePath,CommandLine; if ($null -eq $p) { $null | ConvertTo-Json -Compress } else { $p | ConvertTo-Json -Compress -Depth 3 }`, pid)
 	result := run("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
 	if result.ExitCode != 0 {
-		return ""
+		return nil, errors.New(resultError(result))
 	}
-	return strings.TrimSpace(result.Output)
+	processes, err := detector.ParseProcessJSON(result.Output)
+	if err != nil {
+		return nil, err
+	}
+	if len(processes) == 0 {
+		return nil, nil
+	}
+	classified := detector.ClassifyProcess(processes[0], detector.MatchOptions{})
+	return &classified, nil
+}
+
+func (e Executor) waitForProcessExit(pid int) error {
+	timeout := e.ProcessTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	poll := e.ProcessPoll
+	if poll <= 0 {
+		poll = 500 * time.Millisecond
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		current, err := currentProcess(e.RunCommand, pid)
+		if err != nil {
+			return err
+		}
+		if current == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("PID %d still exists after %s", pid, timeout)
+		}
+		time.Sleep(poll)
+	}
+}
+
+func plannedProcessActionTrusted(action CleanupAction) bool {
+	if action.Type != CleanupActionKillProcess || !action.Safe || action.PID <= 0 {
+		return false
+	}
+	if strings.TrimSpace(action.ProcessName) == "" || strings.TrimSpace(action.ExecutablePath) == "" {
+		return false
+	}
+	switch action.TrustLevel {
+	case detector.ProcessTrustNameAndPathMatch, detector.ProcessTrustHiddenWMIExactPath, detector.ProcessTrustTrusted:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateCurrentProcessMatchesPlan(current detector.ProcessState, action CleanupAction) error {
+	if current.PID != action.PID {
+		return fmt.Errorf("PID changed: current=%d planned=%d", current.PID, action.PID)
+	}
+	if !strings.EqualFold(current.Name, action.ProcessName) {
+		return fmt.Errorf("process name changed: current=%s planned=%s", current.Name, action.ProcessName)
+	}
+	if !strings.EqualFold(detector.NormalizeWindowsPath(current.ExecutablePath), detector.NormalizeWindowsPath(action.ExecutablePath)) {
+		return fmt.Errorf("process path changed: current=%s planned=%s", current.ExecutablePath, action.ExecutablePath)
+	}
+	if !detector.TrustedProcessForTermination(current) {
+		return fmt.Errorf("current process is not trusted for termination: %s", current.TrustLevel)
+	}
+	if current.TrustLevel != action.TrustLevel {
+		return fmt.Errorf("trust level changed: current=%s planned=%s", current.TrustLevel, action.TrustLevel)
+	}
+	return nil
 }
 
 func parsePID(target string) int {
@@ -340,25 +409,6 @@ func parsePID(target string) int {
 	}
 	pid, _ := strconv.Atoi(match[1])
 	return pid
-}
-
-func isKnownGrabberProcessPath(path string) bool {
-	normalized := strings.ToLower(detector.NormalizeWindowsPath(path))
-	if normalized == "" {
-		return true
-	}
-	for _, cleanupPath := range config.ExpandedCleanupPaths() {
-		root := strings.ToLower(detector.NormalizeWindowsPath(cleanupPath))
-		if normalized == root || strings.HasPrefix(normalized, root+`\`) {
-			return true
-		}
-	}
-	for _, wmiPath := range config.KnownWMIExecutablePaths {
-		if normalized == strings.ToLower(detector.NormalizeWindowsPath(config.ExpandPath(wmiPath))) {
-			return true
-		}
-	}
-	return false
 }
 
 func isAllowedRegistryTarget(target string) bool {

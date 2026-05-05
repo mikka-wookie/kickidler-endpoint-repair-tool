@@ -105,7 +105,7 @@ func TestVerifyInstallation(t *testing.T) {
 				report.Defender.RequiredPaths = []string{wmiRoot}
 				report.Defender.ExclusionPaths = []string{wmiRoot}
 				report.Services = []detector.ServiceState{{Name: "WmiProviderSE", Exists: true, Status: "running", ImagePath: exe}}
-				report.Processes = []detector.ProcessState{{Name: "svchost.exe", ExecutablePath: exe, MatchedByExactPath: true}}
+				report.Processes = []detector.ProcessState{{Name: "svchost.exe", ExecutablePath: exe, GrabberRelated: true, TrustLevel: detector.ProcessTrustHiddenWMIExactPath, CanTerminate: true, MatchedByExactPath: true}}
 			},
 			opts: VerifyOptions{RequireRunningProcess: true, AllowDefenderUnavailable: true},
 			want: VerificationPassed,
@@ -125,6 +125,24 @@ func TestVerifyInstallation(t *testing.T) {
 				t.Fatalf("OverallStatus = %s, want %s: %#v", got.OverallStatus, tt.want, got)
 			}
 		})
+	}
+}
+
+func TestVerifierDoesNotCountNormalWindowsSvchostAsGrabberProcess(t *testing.T) {
+	report := healthyReport(`C:\Windows\System32\wmi`, `C:\Windows\System32\wmi\bin\svchost.exe`)
+	report.InstallMode = detector.InstallModeHiddenWMI
+	report.BinaryDir = `C:\Windows\System32\wmi\bin`
+	report.Processes = []detector.ProcessState{{
+		Name:           "svchost.exe",
+		ExecutablePath: `C:\Windows\System32\svchost.exe`,
+		TrustLevel:     detector.ProcessTrustPathMismatch,
+		MatchReason:    "normal Windows process, not Grabber hidden WMI path",
+	}}
+
+	result := VerifyInstallation(report, VerifyOptions{RequireRunningProcess: true, AllowDefenderUnavailable: true})
+
+	if result.ProcessStatus != "warning" {
+		t.Fatalf("ProcessStatus = %q, want warning", result.ProcessStatus)
 	}
 }
 
@@ -233,7 +251,14 @@ func healthyReport(root string, exe string) detector.DetectionReport {
 		ServiceExecutableExists: true,
 		RequiredDefenderPaths:   []string{root},
 		Services:                []detector.ServiceState{{Name: "ngs", Exists: true, Status: "running", ImagePath: exe}},
-		Processes:               []detector.ProcessState{{Name: "grabber2.exe", ExecutablePath: exe, MatchedByName: true}},
+		Processes: []detector.ProcessState{{
+			Name:           "grabber2.exe",
+			ExecutablePath: exe,
+			GrabberRelated: true,
+			TrustLevel:     detector.ProcessTrustNameAndPathMatch,
+			CanTerminate:   true,
+			MatchedByName:  true,
+		}},
 		Defender: detector.DefenderState{
 			Available:      true,
 			RequiredPaths:  []string{root},

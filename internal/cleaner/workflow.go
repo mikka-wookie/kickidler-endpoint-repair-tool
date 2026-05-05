@@ -380,8 +380,10 @@ func cleanupLeftoversRemain(report detector.DetectionReport) bool {
 			return true
 		}
 	}
-	if len(report.Processes) > 0 {
-		return true
+	for _, process := range report.Processes {
+		if process.GrabberRelated {
+			return true
+		}
 	}
 	for _, file := range report.Files {
 		if file.Exists {

@@ -31,6 +31,8 @@ type CleanupAction struct {
 	PID            int               `json:"pid,omitempty"`
 	ProcessName    string            `json:"process_name,omitempty"`
 	ExecutablePath string            `json:"executable_path,omitempty"`
+	TrustLevel     string            `json:"trust_level,omitempty"`
+	MatchReason    string            `json:"match_reason,omitempty"`
 	Error          string            `json:"error,omitempty"`
 }
 
@@ -105,15 +107,23 @@ func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
 	}
 
 	for _, process := range report.Processes {
+		if !detector.TrustedProcessForTermination(process) {
+			if process.Name != "" || process.PID != 0 {
+				plan.Warnings = append(plan.Warnings, fmt.Sprintf("Skipped unsafe process match: %s (%s)", detector.ProcessTarget(process), process.MatchReason))
+			}
+			continue
+		}
 		plan.Actions = append(plan.Actions, CleanupAction{
 			Type:           CleanupActionKillProcess,
-			Target:         processTarget(process),
-			Reason:         "Known Grabber process detected",
+			Target:         detector.ProcessTarget(process),
+			Reason:         "Trusted Grabber process detected: " + process.MatchReason,
 			Safe:           true,
 			WouldRun:       opts.DryRun,
 			PID:            process.PID,
 			ProcessName:    process.Name,
 			ExecutablePath: process.ExecutablePath,
+			TrustLevel:     process.TrustLevel,
+			MatchReason:    process.MatchReason,
 		})
 	}
 
@@ -178,14 +188,6 @@ func anyMSIRegistryKeyExists(keys []detector.RegistryState) bool {
 		}
 	}
 	return false
-}
-
-func processTarget(process detector.ProcessState) string {
-	target := fmt.Sprintf("%s PID %d", process.Name, process.PID)
-	if strings.TrimSpace(process.ExecutablePath) != "" {
-		target += " " + process.ExecutablePath
-	}
-	return target
 }
 
 func registryTarget(key detector.RegistryState) string {
