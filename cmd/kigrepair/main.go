@@ -29,6 +29,7 @@ import (
 
 type globalOptions struct {
 	output         string
+	configPath     string
 	quiet          bool
 	nonInteractive bool
 	force          bool
@@ -47,6 +48,7 @@ func main() {
 	}
 
 	rootCmd.PersistentFlags().StringVar(&opts.output, "output", "", "report output directory or report root")
+	rootCmd.PersistentFlags().StringVar(&opts.configPath, "config", "", "path to kigrepair YAML config")
 	rootCmd.PersistentFlags().BoolVar(&opts.quiet, "quiet", false, "suppress console output")
 	rootCmd.PersistentFlags().BoolVar(&opts.nonInteractive, "non-interactive", false, "disable interactive prompts")
 	rootCmd.PersistentFlags().BoolVar(&opts.force, "force", false, "allow future privileged workflows to bypass confirmations")
@@ -65,6 +67,7 @@ func main() {
 	rootCmd.AddCommand(reportsCommand(opts))
 	rootCmd.AddCommand(verifyCommand(opts))
 	rootCmd.AddCommand(wizardCommand(opts))
+	rootCmd.AddCommand(configCommand(opts))
 	rootCmd.AddCommand(versionCommand(opts))
 
 	if err := rootCmd.Execute(); err != nil {
@@ -89,6 +92,19 @@ func wizardCommand(opts *globalOptions) *cobra.Command {
 		Aliases: []string{"support"},
 		Short:   "Run an interactive support wizard",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			effective, err := loadEffectiveConfig(opts)
+			if err != nil {
+				return err
+			}
+			if !cmd.Flags().Changed("collect-bundle") {
+				collectBundle = effective.Config.Wizard.CollectBundleOnFailure
+			}
+			if !cmd.Flags().Changed("repair") {
+				allowRepair = effective.Config.Wizard.OfferRepair
+			}
+			if effective.Config.Profile == "diagnostic" && !cmd.Flags().Changed("repair") {
+				allowRepair = false
+			}
 			return runWorkflow(opts, wizard.Workflow{Options: wizard.Options{
 				InstallerPath:  installerPath,
 				HasInvite:      strings.TrimSpace(invite) != "",
@@ -122,10 +138,17 @@ func repairCommand(opts *globalOptions) *cobra.Command {
 		Use:   "repair",
 		Short: "Repair Grabber by cleaning broken state, installing MSI, and ensuring Defender exclusions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if dryRun {
-				return runWorkflowWithAdmin(cmd, opts, "repair --dry-run", false, repair.DryRunWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
+			effective, err := loadEffectiveConfig(opts)
+			if err != nil {
+				return err
 			}
-			return runWorkflowWithAdmin(cmd, opts, "repair", true, repair.RepairWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
+			resolver := func(path string) (installer.InstallerResolution, error) {
+				return installer.ResolveInstallerWithConfig(path, effective.Config.Installer.LookupPaths, effective.Config.Installer.PreferredNames)
+			}
+			if dryRun {
+				return runWorkflowWithAdmin(cmd, opts, "repair --dry-run", false, repair.DryRunWorkflow{Invite: invite, Installer: installerPath, Yes: yes, InstallerResolver: resolver})
+			}
+			return runWorkflowWithAdmin(cmd, opts, "repair", true, repair.RepairWorkflow{Invite: invite, Installer: installerPath, Yes: yes, InstallerResolver: resolver})
 		},
 	}
 	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
@@ -158,7 +181,14 @@ func installCommand(opts *globalOptions) *cobra.Command {
 		Use:   "install",
 		Short: "Install Grabber from an MSI package",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowWithAdmin(cmd, opts, "install", true, installer.InstallWorkflow{Invite: invite, Installer: installerPath, Yes: yes})
+			effective, err := loadEffectiveConfig(opts)
+			if err != nil {
+				return err
+			}
+			resolver := func(path string) (installer.InstallerResolution, error) {
+				return installer.ResolveInstallerWithConfig(path, effective.Config.Installer.LookupPaths, effective.Config.Installer.PreferredNames)
+			}
+			return runWorkflowWithAdmin(cmd, opts, "install", true, installer.InstallWorkflow{Invite: invite, Installer: installerPath, Yes: yes, Resolve: resolver})
 		},
 	}
 	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
@@ -193,6 +223,16 @@ func collectReportCommand(opts *globalOptions) *cobra.Command {
 		Use:   "collect-report",
 		Short: "Collect read-only diagnostics and create a support bundle",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			effective, err := loadEffectiveConfig(opts)
+			if err != nil {
+				return err
+			}
+			if !cmd.Flags().Changed("include-eventlogs") {
+				includeEventLogs = effective.Config.Bundle.IncludeSystem
+			}
+			if !cmd.Flags().Changed("include-history") {
+				includeHistory = effective.Config.Bundle.IncludeMSILogs
+			}
 			return runWorkflow(opts, diagnostics.CollectReportWorkflow{
 				IncludeEventLogs: includeEventLogs,
 				IncludeHistory:   includeHistory,
@@ -225,7 +265,11 @@ func reportsListCommand(opts *globalOptions) *cobra.Command {
 		Use:   "list",
 		Short: "List kigrepair report directories",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			root := reportRootFromOptions(opts)
+			effective, err := loadEffectiveConfig(opts)
+			if err != nil {
+				return err
+			}
+			root := reportRootFromEffectiveOptions(opts, effective)
 			result, err := reports.ListReports(root, reports.ReportListOptions{Limit: limit, All: all})
 			exitCode := app.ExitSuccess
 			if len(result.Warnings) > 0 {
@@ -264,6 +308,16 @@ func reportsCleanupCommand(opts *globalOptions) *cobra.Command {
 		Use:   "cleanup",
 		Short: "Safely clean old kigrepair report directories",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			effective, err := loadEffectiveConfig(opts)
+			if err != nil {
+				return err
+			}
+			if !cmd.Flags().Changed("older-than") {
+				olderThan = fmt.Sprintf("%dd", effective.Config.Reports.RetentionDays)
+			}
+			if !cmd.Flags().Changed("keep-last") {
+				keepLast = effective.Config.Reports.KeepLast
+			}
 			return runReportWorkflow(opts, reports.CleanupReportsWorkflow{
 				OlderThan: olderThan,
 				KeepLast:  keepLast,
@@ -276,6 +330,71 @@ func reportsCleanupCommand(opts *globalOptions) *cobra.Command {
 	cmd.Flags().IntVar(&keepLast, "keep-last", reports.DefaultRetentionKeepLast, "always keep the newest N report directories")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "create a cleanup plan without deleting reports")
 	cmd.Flags().BoolVar(&yes, "yes", false, "execute the validated report cleanup plan")
+	return cmd
+}
+
+func configCommand(opts *globalOptions) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "Show, validate, or print kigrepair configuration",
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "Show effective configuration",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			effective, err := loadEffectiveConfig(opts)
+			if err != nil {
+				return err
+			}
+			if opts.output != "" {
+				effective.Config.Reports.Root = opts.output
+			}
+			if opts.quiet {
+				effective.Config.Logging.Console = false
+			}
+			if opts.jsonOutput {
+				encoder := json.NewEncoder(cmd.OutOrStdout())
+				encoder.SetIndent("", "  ")
+				encoder.SetEscapeHTML(false)
+				return encoder.Encode(effective)
+			}
+			fmt.Fprint(cmd.OutOrStdout(), config.FormatShow(effective))
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "validate",
+		Short: "Validate configuration",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			effective, err := loadEffectiveConfig(opts)
+			if err != nil {
+				fmt.Fprintln(cmd.ErrOrStderr(), err)
+				return app.ExitError{Code: app.ExitInvalidInput}
+			}
+			validation := config.ValidateConfig(effective.Config)
+			validation.Warnings = append(effective.Warnings, validation.Warnings...)
+			if opts.jsonOutput {
+				encoder := json.NewEncoder(cmd.OutOrStdout())
+				encoder.SetIndent("", "  ")
+				encoder.SetEscapeHTML(false)
+				_ = encoder.Encode(validation)
+			} else {
+				fmt.Fprint(cmd.OutOrStdout(), config.FormatValidation(validation))
+			}
+			if !validation.OK() {
+				return app.ExitError{Code: app.ExitInvalidInput}
+			}
+			return nil
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:   "sample",
+		Short: "Print a sample YAML configuration",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprint(cmd.OutOrStdout(), config.SampleYAML)
+			return nil
+		},
+	})
 	return cmd
 }
 
@@ -296,9 +415,25 @@ func preflightCommand(opts *globalOptions) *cobra.Command {
 		Use:   "preflight",
 		Short: "Checks whether this machine is ready for Grabber repair without modifying the system.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			effective, err := loadEffectiveConfig(opts)
+			if err != nil {
+				return err
+			}
+			resolver := func(path string) preflight.InstallerResolution {
+				resolution, err := installer.ResolveInstallerWithConfig(path, effective.Config.Installer.LookupPaths, effective.Config.Installer.PreferredNames)
+				return preflight.InstallerResolution{
+					Path:       resolution.SelectedPath,
+					Provided:   strings.TrimSpace(path) != "",
+					Discovered: strings.TrimSpace(path) == "" && strings.TrimSpace(resolution.SelectedPath) != "",
+					Error:      errorString(err),
+				}
+			}
 			return runWorkflowWithAdmin(cmd, opts, "preflight", false, preflight.Workflow{
 				InstallerPath: installerPath,
 				HasInvite:     strings.TrimSpace(invite) != "",
+				Deps: preflight.Dependencies{
+					ResolveInstaller: resolver,
+				},
 			})
 		},
 	}
@@ -383,9 +518,15 @@ func versionCommand(opts *globalOptions) *cobra.Command {
 }
 
 func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
+	effective, err := loadEffectiveConfig(opts)
+	if err != nil {
+		return err
+	}
 	ctx := app.NewContext()
 	ctx.StartedAt = time.Now()
-	ctx.ReportRoot = config.DefaultReportRoot
+	ctx.Config = effective.Config
+	ctx.ConfigMeta = effective.Metadata()
+	ctx.ReportRoot = reportRootFromEffectiveOptions(opts, effective)
 	ctx.Quiet = opts.quiet
 	ctx.NonInteractive = opts.nonInteractive
 	ctx.Force = opts.force
@@ -404,6 +545,9 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 		return err
 	}
 	ctx.Reporter = reporter
+	if err := ctx.Reporter.WriteJSON("config-metadata", ctx.ConfigMeta); err != nil {
+		return err
+	}
 
 	suppressConsoleLog := ctx.Quiet || ctx.JSONOutput || workflow.Name() == "verify" || workflow.Name() == "preflight"
 	logger, err := logging.New(reports.LogPath(ctx.OutputDir), suppressConsoleLog)
@@ -438,9 +582,15 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 }
 
 func runReportWorkflow(opts *globalOptions, workflow app.Workflow) error {
+	effective, err := loadEffectiveConfig(opts)
+	if err != nil {
+		return err
+	}
 	ctx := app.NewContext()
 	ctx.StartedAt = time.Now()
-	ctx.ReportRoot = reportRootFromOptions(opts)
+	ctx.Config = effective.Config
+	ctx.ConfigMeta = effective.Metadata()
+	ctx.ReportRoot = reportRootFromEffectiveOptions(opts, effective)
 	ctx.OutputDir = uniqueTimestampedReportDir(ctx.ReportRoot, ctx.StartedAt)
 	ctx.Quiet = opts.quiet
 	ctx.NonInteractive = opts.nonInteractive
@@ -455,6 +605,9 @@ func runReportWorkflow(opts *globalOptions, workflow app.Workflow) error {
 		return err
 	}
 	ctx.Reporter = reporter
+	if err := ctx.Reporter.WriteJSON("config-metadata", ctx.ConfigMeta); err != nil {
+		return err
+	}
 
 	suppressConsoleLog := ctx.Quiet || ctx.JSONOutput
 	logger, err := logging.New(reports.LogPath(ctx.OutputDir), suppressConsoleLog)
@@ -493,6 +646,37 @@ func reportRootFromOptions(opts *globalOptions) string {
 		return opts.output
 	}
 	return config.DefaultReportRoot
+}
+
+func reportRootFromEffectiveOptions(opts *globalOptions, effective config.EffectiveConfig) string {
+	if strings.TrimSpace(opts.output) != "" {
+		return opts.output
+	}
+	if strings.TrimSpace(effective.Config.Reports.Root) != "" {
+		return effective.Config.Reports.Root
+	}
+	return config.DefaultReportRoot
+}
+
+func loadEffectiveConfig(opts *globalOptions) (config.EffectiveConfig, error) {
+	effective, err := config.Load(config.LoadOptions{ExplicitPath: opts.configPath})
+	if err != nil {
+		return config.EffectiveConfig{}, err
+	}
+	if strings.TrimSpace(opts.output) != "" {
+		effective.Config.Reports.Root = opts.output
+	}
+	if opts.quiet {
+		effective.Config.Logging.Console = false
+	}
+	return effective, nil
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func uniqueTimestampedReportDir(root string, startedAt time.Time) string {

@@ -16,6 +16,7 @@ type InstallerSource string
 
 const (
 	InstallerSourceExplicit   InstallerSource = "explicit"
+	InstallerSourceConfig     InstallerSource = "config"
 	InstallerSourceExeDir     InstallerSource = "exe_dir"
 	InstallerSourceWorkDir    InstallerSource = "work_dir"
 	InstallerSourceWorkAssets InstallerSource = "work_assets"
@@ -52,10 +53,20 @@ type InstallerSearchPath struct {
 var ErrInstallerNotFound = errors.New("no supported Grabber MSI installer found")
 
 func ResolveInstaller(explicitPath string) (InstallerResolution, error) {
+	return ResolveInstallerWithConfig(explicitPath, nil, nil)
+}
+
+func ResolveInstallerWithConfig(explicitPath string, configLookupPaths []string, preferredNames []string) (InstallerResolution, error) {
 	exePath, exeErr := os.Executable()
 	workDir, workErr := os.Getwd()
 
 	search := []InstallerSearchPath{}
+	for _, dir := range configLookupPaths {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+		search = append(search, InstallerSearchPath{Dir: dir, Source: InstallerSourceConfig})
+	}
 	if exeErr == nil {
 		exeDir := filepath.Dir(exePath)
 		search = append(search, InstallerSearchPath{Dir: exeDir, Source: InstallerSourceExeDir})
@@ -68,10 +79,14 @@ func ResolveInstaller(explicitPath string) (InstallerResolution, error) {
 		search = append(search, InstallerSearchPath{Dir: filepath.Join(filepath.Dir(exePath), "assets"), Source: InstallerSourceExeAssets})
 	}
 
-	return ResolveInstallerWithSearchPaths(explicitPath, search, runtime.GOARCH)
+	return ResolveInstallerWithSearchPathsAndNames(explicitPath, search, runtime.GOARCH, preferredNames)
 }
 
 func ResolveInstallerWithSearchPaths(explicitPath string, searchPaths []InstallerSearchPath, osArch string) (InstallerResolution, error) {
+	return ResolveInstallerWithSearchPathsAndNames(explicitPath, searchPaths, osArch, nil)
+}
+
+func ResolveInstallerWithSearchPathsAndNames(explicitPath string, searchPaths []InstallerSearchPath, osArch string, configuredPreferredNames []string) (InstallerResolution, error) {
 	resolution := InstallerResolution{
 		ExplicitPath:   strings.TrimSpace(explicitPath),
 		SelectedSource: InstallerSourceNotFound,
@@ -112,7 +127,7 @@ func ResolveInstallerWithSearchPaths(explicitPath string, searchPaths []Installe
 			Name:          name,
 			Source:        InstallerSourceExplicit,
 			Exists:        true,
-			PreferredRank: preferredRank(name, PreferredInstallerNames(resolution.OSArchitecture)),
+			PreferredRank: preferredRank(name, effectivePreferredInstallerNames(resolution.OSArchitecture, configuredPreferredNames)),
 			Architecture:  arch,
 			PackageType:   packageType,
 			Validation:    validation,
@@ -120,7 +135,7 @@ func ResolveInstallerWithSearchPaths(explicitPath string, searchPaths []Installe
 		return resolution, nil
 	}
 
-	preferredNames := PreferredInstallerNames(resolution.OSArchitecture)
+	preferredNames := effectivePreferredInstallerNames(resolution.OSArchitecture, configuredPreferredNames)
 	for _, searchPath := range searchPaths {
 		dir := strings.TrimSpace(searchPath.Dir)
 		if dir == "" {
@@ -248,17 +263,33 @@ func sourceRank(source InstallerSource) int {
 	switch source {
 	case InstallerSourceExplicit:
 		return 0
-	case InstallerSourceExeDir:
+	case InstallerSourceConfig:
 		return 1
-	case InstallerSourceWorkDir:
+	case InstallerSourceExeDir:
 		return 2
-	case InstallerSourceWorkAssets:
+	case InstallerSourceWorkDir:
 		return 3
-	case InstallerSourceExeAssets:
+	case InstallerSourceWorkAssets:
 		return 4
+	case InstallerSourceExeAssets:
+		return 5
 	default:
 		return 99
 	}
+}
+
+func effectivePreferredInstallerNames(osArch string, configured []string) []string {
+	names := make([]string, 0, len(configured))
+	for _, name := range configured {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) > 0 {
+		return names
+	}
+	return PreferredInstallerNames(osArch)
 }
 
 func ValidationFromResolution(resolution InstallerResolution) *ValidationResult {

@@ -52,6 +52,9 @@ func (w CollectReportWorkflow) Run(ctx *app.AppContext) error {
 	ctx.JSONValue = result
 	ctx.Logger.Info("collect-report started")
 	ctx.Logger.Info("report directory: %s", ctx.OutputDir)
+	if err := ctx.Reporter.WriteJSON(filepath.Join("system", "config"), ctx.ConfigMeta); err != nil {
+		return err
+	}
 
 	detect := detector.Detect
 	if w.Detect != nil {
@@ -79,7 +82,7 @@ func (w CollectReportWorkflow) Run(ctx *app.AppContext) error {
 	}
 	ctx.Logger.Info("Wrote classification-result.json")
 
-	collectors := w.collectors(detection)
+	collectors := w.collectors(ctx, detection)
 	for _, collector := range collectors {
 		ctx.Logger.Info("collector start: %s", collector.Name())
 		result := collector.Collect(ctx)
@@ -234,7 +237,7 @@ func collectStatus(result CollectReportResult) string {
 	return "success"
 }
 
-func (w CollectReportWorkflow) collectors(detection detector.DetectionReport) []Collector {
+func (w CollectReportWorkflow) collectors(ctx *app.AppContext, detection detector.DetectionReport) []Collector {
 	if w.Collectors != nil {
 		return w.Collectors
 	}
@@ -244,11 +247,15 @@ func (w CollectReportWorkflow) collectors(detection detector.DetectionReport) []
 	}
 	collectors := []Collector{
 		DetectionCollector{Report: detection},
-		SystemInfoCollector{Report: detection},
 		ServicesCollector{Report: detection},
 		ProcessesCollector{Report: detection},
 		DefenderCollector{Report: detection},
 		RegistryCollector{Report: detection},
+	}
+	if ctx.Config.Bundle.IncludeSystem {
+		collectors = append([]Collector{SystemInfoCollector{Report: detection}}, collectors...)
+	} else {
+		collectors = append([]Collector{SkippedCollector{NameValue: "system", StepValue: "collect.system", TargetValue: "system", MessageValue: "System diagnostics disabled by config"}}, collectors...)
 	}
 	if w.IncludeEventLogs {
 		collectors = append(collectors, EventLogCollector{})
@@ -256,7 +263,12 @@ func (w CollectReportWorkflow) collectors(detection detector.DetectionReport) []
 		collectors = append(collectors, SkippedCollector{NameValue: "eventlogs", StepValue: "collect.eventlogs", TargetValue: "eventlogs", MessageValue: "Event log collection disabled"})
 	}
 	if w.IncludeHistory {
-		collectors = append(collectors, HistoryCollector{Limit: historyLimit}, MSILogsCollector{Limit: historyLimit})
+		collectors = append(collectors, HistoryCollector{Limit: historyLimit})
+		if ctx.Config.Bundle.IncludeMSILogs {
+			collectors = append(collectors, MSILogsCollector{Limit: historyLimit})
+		} else {
+			collectors = append(collectors, SkippedCollector{NameValue: "msi-logs", StepValue: "collect.msi_logs", TargetValue: "msi-logs", MessageValue: "MSI log collection disabled by config"})
+		}
 	} else {
 		collectors = append(collectors,
 			SkippedCollector{NameValue: "history", StepValue: "collect.history", TargetValue: "history", MessageValue: "History collection disabled"},

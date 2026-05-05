@@ -29,6 +29,8 @@ type AppContext struct {
 	NonInteractive bool
 	Force          bool
 	JSONOutput     bool
+	Config         config.Config
+	ConfigMeta     config.Metadata
 	Logger         Logger
 	Reporter       Reporter
 	Results        []OperationResult
@@ -41,6 +43,8 @@ func NewContext() *AppContext {
 	return &AppContext{
 		Mode:       RunModeCLI,
 		ReportRoot: config.DefaultReportRoot,
+		Config:     config.DefaultConfig(),
+		ConfigMeta: config.EffectiveConfig{Config: config.DefaultConfig()}.Metadata(),
 		StartedAt:  startedAt,
 		Results:    make([]OperationResult, 0),
 	}
