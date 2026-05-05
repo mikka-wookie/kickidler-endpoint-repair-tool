@@ -25,6 +25,9 @@ func TestCreateSupportBundleUsesDeterministicLayoutAndManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "installer-validation.json"), []byte(`{"status":"valid"}`), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "rollback-info.json"), []byte(`{"has_invite":true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := CreateSupportBundle(dir)
 	if err != nil {
@@ -70,6 +73,9 @@ func TestCreateSupportBundleUsesDeterministicLayoutAndManifest(t *testing.T) {
 	if !names["kigrepair-support-bundle/reports/installer-validation.json"] {
 		t.Fatalf("installer-validation.json was not included")
 	}
+	if !names["kigrepair-support-bundle/reports/rollback-info.json"] {
+		t.Fatalf("rollback-info.json was not included")
+	}
 	if strings.Contains(contents["kigrepair-support-bundle/summary.txt"], "SECRET123") {
 		t.Fatalf("summary was not redacted: %q", contents["kigrepair-support-bundle/summary.txt"])
 	}
@@ -81,8 +87,8 @@ func TestCreateSupportBundleUsesDeterministicLayoutAndManifest(t *testing.T) {
 	if err := json.Unmarshal([]byte(contents["kigrepair-support-bundle/manifest.json"]), &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Files) != 3 {
-		t.Fatalf("manifest files = %d, want 3", len(manifest.Files))
+	if len(manifest.Files) != 4 {
+		t.Fatalf("manifest files = %d, want 4", len(manifest.Files))
 	}
 	for _, file := range manifest.Files {
 		if file.SHA256 == "" {

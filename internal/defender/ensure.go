@@ -2,6 +2,7 @@ package defender
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"kigrepair/internal/config"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/rollback"
 )
 
 const noInstallRootWarning = "No active installation root detected; Defender exclusions were not changed"
@@ -168,6 +170,28 @@ func (w DefenderWorkflow) Run(ctx *app.AppContext) error {
 	}
 	ctx.Logger.Info("confirmation status: accepted")
 
+	rollbackInfo, err := createDefenderRollback(ctx, initial, result.MissingBefore)
+	if err != nil {
+		ctx.ExitCode = ExitUnexpectedError
+		message := "Rollback snapshot failed"
+		result.Errors = append(result.Errors, message+": "+err.Error())
+		addOperation(ctx, "rollback.snapshot_capture", rollback.Path(ctx.OutputDir), app.OperationStatusFailed, message, err.Error())
+		ctx.Logger.Error("rollback snapshot failed: %s", err)
+		if !ctx.Quiet && !ctx.JSONOutput {
+			fmt.Fprintln(os.Stderr, "Rollback snapshot: failed")
+			fmt.Fprintln(os.Stderr, "No system changes were made.")
+			fmt.Fprintln(os.Stderr, "Reason: could not write rollback-info.json")
+		}
+		return w.finish(ctx, result, nil)
+	}
+	ledger := rollback.NewLedger(rollbackInfo)
+	result.Rollback = ptrRollbackSummary(rollback.SummaryFromInfo(rollback.Path(ctx.OutputDir), rollbackInfo))
+	if !ctx.Quiet && !ctx.JSONOutput {
+		fmt.Println("Rollback snapshot: created")
+		fmt.Println("Snapshot file: " + rollback.Path(ctx.OutputDir))
+		fmt.Println("Restore supported: no")
+	}
+
 	adder := w.Adder
 	if adder == nil {
 		adder = PowerShellExclusionAdder{}
@@ -184,14 +208,22 @@ func (w DefenderWorkflow) Run(ctx *app.AppContext) error {
 		}
 		if commandResult.ExitCode == 0 && commandResult.Err == nil {
 			result.AddedPaths = append(result.AddedPaths, path)
-			addOperation(ctx, "defender_exclusion_add", path, app.OperationStatusSuccess, "Defender exclusion added", "")
+			op := addOperation(ctx, "defender_exclusion_add", path, app.OperationStatusSuccess, "Defender exclusion added", "")
+			rollback.RecordExecutedChange(ledger, rollback.ExecutedChangeFromOperation(op, rollbackInfo.PlannedChanges))
 			continue
 		}
 		errText := commandErrorSummary(commandResult)
 		result.FailedPaths = append(result.FailedPaths, path)
 		result.Errors = append(result.Errors, errText)
-		addOperation(ctx, "defender_exclusion_add", path, app.OperationStatusFailed, "Defender exclusion add failed", errText)
+		op := addOperation(ctx, "defender_exclusion_add", path, app.OperationStatusFailed, "Defender exclusion add failed", errText)
+		rollback.RecordExecutedChange(ledger, rollback.ExecutedChangeFromOperation(op, rollbackInfo.PlannedChanges))
 	}
+	result.Rollback = ptrRollbackSummary(rollback.SummaryFromInfo(rollback.Path(ctx.OutputDir), rollbackInfo))
+	addOperation(ctx, "rollback.executed_changes_recorded", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback executed changes recorded", "")
+	if err := rollback.WriteFile(ctx.OutputDir, rollbackInfo); err != nil {
+		return err
+	}
+	addOperation(ctx, "rollback.info_written", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback info written", "")
 
 	final := detect()
 	if err := ctx.Reporter.WriteJSON("final-detection", final); err != nil {
@@ -304,7 +336,7 @@ func addCoverageOperations(ctx *app.AppContext, required []string, exclusions []
 	}
 }
 
-func addOperation(ctx *app.AppContext, step string, target string, status app.OperationStatus, message string, errText string) {
+func addOperation(ctx *app.AppContext, step string, target string, status app.OperationStatus, message string, errText string) app.OperationResult {
 	result := app.OperationResult{
 		Step:      step,
 		Target:    target,
@@ -315,6 +347,44 @@ func addOperation(ctx *app.AppContext, step string, target string, status app.Op
 	}
 	ctx.AddResult(result)
 	logging.LogOperation(ctx.Logger, result)
+	return result
+}
+
+func createDefenderRollback(ctx *app.AppContext, initial detector.DetectionReport, missing []string) (*rollback.RollbackInfo, error) {
+	planned := make([]rollback.PlannedChange, 0, len(missing))
+	for idx, path := range missing {
+		planned = append(planned, rollback.PlannedChange{
+			ID:          fmt.Sprintf("defender_ensure-%03d", idx+1),
+			Type:        rollback.TypeDefenderAddExclusion,
+			Target:      path,
+			Destructive: false,
+			Reason:      "Defender ensure adds missing exclusion",
+			Source:      rollback.WorkflowDefenderEnsure,
+		})
+	}
+	info, err := rollback.CaptureSnapshot(context.Background(), rollback.SnapshotInput{
+		ReportDir:      ctx.OutputDir,
+		Workflow:       rollback.WorkflowDefenderEnsure,
+		Detection:      &initial,
+		IsAdmin:        initial.IsAdmin,
+		RequiredPaths:  missing,
+		PlannedChanges: planned,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := rollback.WriteFile(ctx.OutputDir, info); err != nil {
+		return nil, err
+	}
+	addOperation(ctx, "rollback.snapshot_capture", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback snapshot captured", "")
+	addOperation(ctx, "rollback.planned_changes_recorded", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback planned changes recorded", "")
+	addOperation(ctx, "rollback.info_written", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback info written", "")
+	ctx.Logger.Info("rollback snapshot created: %s", rollback.Path(ctx.OutputDir))
+	return info, nil
+}
+
+func ptrRollbackSummary(summary rollback.Summary) *rollback.Summary {
+	return &summary
 }
 
 func missingPaths(required, exclusions []string) []string {

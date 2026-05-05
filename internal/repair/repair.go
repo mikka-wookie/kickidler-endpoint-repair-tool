@@ -1,6 +1,7 @@
 package repair
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"kigrepair/internal/installer"
 	"kigrepair/internal/logging"
 	"kigrepair/internal/recommendations"
+	"kigrepair/internal/rollback"
 	"kigrepair/internal/verifier"
 )
 
@@ -174,6 +176,29 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 		return w.finish(ctx, result, &initial)
 	}
 
+	rollbackInfo, err := w.createRollback(ctx, initial, plan, decision, installerPath, result.InviteProvided, admin)
+	if err != nil {
+		ctx.ExitCode = ExitUnexpectedError
+		message := "Rollback snapshot failed"
+		result.Errors = append(result.Errors, message+": "+err.Error())
+		addOperation(ctx, "rollback.snapshot_capture", rollback.Path(ctx.OutputDir), app.OperationStatusFailed, message, err.Error())
+		ctx.Logger.Error("rollback snapshot failed: %s", err)
+		if !ctx.Quiet && !ctx.JSONOutput {
+			fmt.Fprintln(os.Stderr, "Rollback snapshot: failed")
+			fmt.Fprintln(os.Stderr, "No system changes were made.")
+			fmt.Fprintln(os.Stderr, "Reason: could not write rollback-info.json")
+		}
+		return w.finish(ctx, result, &initial)
+	}
+	ledger := rollback.NewLedger(rollbackInfo)
+	result.Rollback = ptrRollbackSummary(rollback.SummaryFromInfo(rollback.Path(ctx.OutputDir), rollbackInfo))
+	if !ctx.Quiet && !ctx.JSONOutput {
+		fmt.Println("Rollback snapshot: created")
+		fmt.Println("Snapshot file: " + rollback.Path(ctx.OutputDir))
+		fmt.Println("Restore supported: no")
+	}
+	executionStart := len(ctx.Results)
+
 	if decision.CleanupNeeded {
 		result.CleanupExecuted = true
 		executor := w.CleanupExecutor
@@ -184,6 +209,10 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 			ctx.AddResult(operation)
 			classifyOperation(&result, operation)
 		}
+		for _, change := range cleaner.RollbackExecutedChanges(ctx.Results[executionStart:], rollbackInfo.PlannedChanges) {
+			rollback.RecordExecutedChange(ledger, change)
+		}
+		executionStart = len(ctx.Results)
 		if err := ctx.Reporter.WriteJSON("cleanup-result", cleanupResult(plan, ctx.Results)); err != nil {
 			return err
 		}
@@ -206,7 +235,18 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 	if decision.InstallNeeded {
 		result.InstallExecuted = true
 		msi = w.runInstall(ctx, installerPath, invite)
+		for _, operation := range ctx.Results[executionStart:] {
+			if operation.Step == "msi_install" {
+				rollback.RecordExecutedChange(ledger, rollback.ExecutedChangeFromOperation(operation, rollbackInfo.PlannedChanges))
+			}
+		}
+		executionStart = len(ctx.Results)
 		result.RebootRequired = msi.RebootRequired
+		result.Rollback = ptrRollbackSummary(rollback.SummaryFromInfo(rollback.Path(ctx.OutputDir), rollbackInfo))
+		if err := rollback.WriteFile(ctx.OutputDir, rollbackInfo); err != nil {
+			return err
+		}
+		addOperation(ctx, "rollback.info_written", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback info written", "")
 		if err := ctx.Reporter.WriteJSON("install-result", installResult(startedAt, string(ctx.Mode), installerPath, result.InviteProvided, msi, ctx.OutputDir, resolution, result.InstallerValidation)); err != nil {
 			return err
 		}
@@ -222,6 +262,11 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 
 	defenderResult, defenderRan := w.runDefenderEnsure(ctx, detect, decision.DefenderNeeded)
 	result.DefenderExecuted = defenderRan
+	for _, operation := range ctx.Results[executionStart:] {
+		if operation.Step == "defender_ensure" {
+			rollback.RecordExecutedChange(ledger, rollback.ExecutedChangeFromOperation(operation, rollbackInfo.PlannedChanges))
+		}
+	}
 	if defenderRan {
 		if err := ctx.Reporter.WriteJSON("defender-result", defenderResult); err != nil {
 			return err
@@ -260,6 +305,12 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 	ctx.Logger.Info("final verification result: %s", verification.OverallStatus)
 
 	ctx.ExitCode = finalExitCode(msi, verification, ctx.Results, defenderRan)
+	result.Rollback = ptrRollbackSummary(rollback.SummaryFromInfo(rollback.Path(ctx.OutputDir), rollbackInfo))
+	addOperation(ctx, "rollback.executed_changes_recorded", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback executed changes recorded", "")
+	if err := rollback.WriteFile(ctx.OutputDir, rollbackInfo); err != nil {
+		return err
+	}
+	addOperation(ctx, "rollback.info_written", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback info written", "")
 	return w.finish(ctx, result, &final)
 }
 
@@ -296,6 +347,63 @@ func (w RepairWorkflow) buildCleanupPlan(report detector.DetectionReport) cleane
 		return w.BuildCleanupPlan(report)
 	}
 	return cleaner.BuildPlan(report, cleaner.PlanOptions{DryRun: false})
+}
+
+func (w RepairWorkflow) createRollback(ctx *app.AppContext, initial detector.DetectionReport, plan cleaner.CleanupPlan, decision Decision, installerPath string, hasInvite bool, isAdmin bool) (*rollback.RollbackInfo, error) {
+	planned := cleaner.RollbackPlannedChanges(plan, rollback.WorkflowRepair)
+	if decision.InstallNeeded {
+		planned = append(planned, rollback.PlannedChange{
+			ID:          fmt.Sprintf("%s-%03d", rollback.WorkflowRepair, len(planned)+1),
+			Type:        rollback.TypeMSIInstall,
+			Target:      installerPath,
+			Destructive: true,
+			Reason:      "Repair requires MSI installation",
+			Source:      rollback.WorkflowRepair,
+		})
+	}
+	if decision.DefenderNeeded {
+		required, _ := defender.RequiredPaths(initial, false)
+		for _, path := range required {
+			if detector.IsPathCoveredByAnyExclusion(path, initial.Defender.ExclusionPaths) {
+				continue
+			}
+			planned = append(planned, rollback.PlannedChange{
+				ID:          fmt.Sprintf("%s-%03d", rollback.WorkflowRepair, len(planned)+1),
+				Type:        rollback.TypeDefenderAddExclusion,
+				Target:      path,
+				Destructive: false,
+				Reason:      "Repair requires Defender exclusion",
+				Source:      rollback.WorkflowRepair,
+			})
+		}
+	}
+	info, err := rollback.CaptureSnapshot(context.Background(), rollback.SnapshotInput{
+		ReportDir:      ctx.OutputDir,
+		Workflow:       rollback.WorkflowRepair,
+		Detection:      &initial,
+		InstallerPath:  installerPath,
+		HasInvite:      hasInvite,
+		IsAdmin:        isAdmin,
+		FileTargets:    cleaner.RollbackFileTargets(plan),
+		RegistryKeys:   cleaner.RollbackRegistryTargets(plan),
+		RequiredPaths:  initial.RequiredDefenderPaths,
+		PlannedChanges: planned,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := rollback.WriteFile(ctx.OutputDir, info); err != nil {
+		return nil, err
+	}
+	addOperation(ctx, "rollback.snapshot_capture", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback snapshot captured", "")
+	addOperation(ctx, "rollback.planned_changes_recorded", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback planned changes recorded", "")
+	addOperation(ctx, "rollback.info_written", rollback.Path(ctx.OutputDir), app.OperationStatusSuccess, "Rollback info written", "")
+	ctx.Logger.Info("rollback snapshot created: %s", rollback.Path(ctx.OutputDir))
+	return info, nil
+}
+
+func ptrRollbackSummary(summary rollback.Summary) *rollback.Summary {
+	return &summary
 }
 
 func (w RepairWorkflow) confirm(ctx *app.AppContext, initial detector.DetectionReport, decision Decision) error {

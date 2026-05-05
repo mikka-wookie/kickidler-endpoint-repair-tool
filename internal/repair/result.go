@@ -7,6 +7,7 @@ import (
 	"kigrepair/internal/classifier"
 	"kigrepair/internal/installer"
 	"kigrepair/internal/recommendations"
+	"kigrepair/internal/rollback"
 	"kigrepair/internal/verifier"
 )
 
@@ -46,6 +47,7 @@ type RepairResult struct {
 	Verification        *verifier.VerificationResult          `json:"verification_result,omitempty"`
 	Classification      *classifier.ClassificationResult      `json:"classification,omitempty"`
 	Recommendation      *recommendations.RecommendationResult `json:"recommendation,omitempty"`
+	Rollback            *rollback.Summary                     `json:"rollback,omitempty"`
 	RebootRequired      bool                                  `json:"reboot_required"`
 	Warnings            []string                              `json:"warnings"`
 	Errors              []string                              `json:"errors"`
