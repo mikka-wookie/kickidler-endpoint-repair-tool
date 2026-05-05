@@ -176,6 +176,7 @@ type bundleSpec struct {
 
 func bundleSpecs() []bundleSpec {
 	reportNames := []string{
+		"wizard-result.json",
 		"repair-plan.json",
 		"preflight-result.json",
 		"initial-detection.json",
