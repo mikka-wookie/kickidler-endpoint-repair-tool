@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -39,6 +40,16 @@ type globalOptions struct {
 }
 
 func main() {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if os.Getenv("KIGREPAIR_DEBUG") == "1" {
+				fmt.Fprintf(os.Stderr, "unexpected error: %v\n%s\n", recovered, debug.Stack())
+			} else {
+				fmt.Fprintf(os.Stderr, "unexpected error: %v\n", recovered)
+			}
+			os.Exit(app.ExitUnexpectedError)
+		}
+	}()
 	opts := &globalOptions{}
 	rootCmd := &cobra.Command{
 		Use:           "kigrepair",

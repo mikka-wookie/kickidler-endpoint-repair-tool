@@ -10,6 +10,7 @@ func TestClassifyMSIInstallExitCode(t *testing.T) {
 		rebootRequired bool
 	}{
 		{code: 0, status: "success", success: true},
+		{code: -1, status: "failed_timeout"},
 		{code: 3010, status: "success_reboot_required", success: true, rebootRequired: true},
 		{code: 1603, status: "failed_fatal_error"},
 		{code: 1619, status: "failed_package_open"},

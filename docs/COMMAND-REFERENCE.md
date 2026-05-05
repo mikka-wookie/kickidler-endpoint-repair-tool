@@ -8,6 +8,8 @@ C:\ProgramData\kigrepair\Reports\<timestamp>\
 
 Use `--config "C:\Path\kigrepair.yaml"` to load optional support defaults. CLI flags override config values. See [Configuration](CONFIGURATION.md).
 
+Failure handling: read-only commands should continue with warnings when service, process, registry, or Defender queries are partially unavailable. Mutating commands should stop before mutation when critical prerequisites fail, including report directory creation, required rollback snapshot writing, missing invite, missing installer, invalid installer, missing admin rights, or missing confirmation. External command details are redacted in logs and reports.
+
 ## Command Safety Classes
 
 Read-only / non-destructive except report writing:
@@ -189,7 +191,7 @@ Example:
 .\kigrepair.exe install --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>" --yes
 ```
 
-Expected exit codes: `0` success, `1` warnings, `2` admin required, `3` confirmation missing, `4` invalid input, `6` install failed, `10` unexpected error.
+Expected exit codes: `0` success, `1` warnings, `2` admin required, `3` confirmation missing, `7` validation or MSI failure, `10` unexpected error.
 
 ## defender status
 
@@ -229,7 +231,7 @@ Example:
 .\kigrepair.exe defender --ensure --yes
 ```
 
-Expected exit codes: `0` success, `1` warnings, `2` admin required, `3` confirmation missing, `8` Defender ensure failed, `10` unexpected error.
+Expected exit codes: `0` success, `1` warnings, `2` admin required, `3` confirmation missing, `7` Defender ensure failed, `10` unexpected error.
 
 ## repair --dry-run
 
@@ -269,7 +271,7 @@ Example:
 .\kigrepair.exe repair --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>" --yes
 ```
 
-Expected exit codes: `0` success, `1` warnings, `2` admin required, `3` confirmation missing, `4` invalid input, `5` cleanup failed, `6` install failed, `7` verification failed, `8` Defender failed, `10` unexpected error.
+Expected exit codes: `0` success, `1` warnings, `2` admin required, `3` confirmation missing, `7` validation, cleanup, install, Defender, or verification failure, `10` unexpected error.
 
 ## collect-report
 

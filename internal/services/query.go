@@ -2,10 +2,11 @@ package services
 
 import (
 	"bytes"
-	"errors"
-	"os/exec"
 	"regexp"
 	"strings"
+
+	"kigrepair/internal/failures"
+	"kigrepair/internal/winapi"
 )
 
 func QueryService(name string, runner CommandRunner) ServiceInfo {
@@ -47,16 +48,28 @@ func QuerySupportedServices(runner CommandRunner) []ServiceInfo {
 }
 
 func RunCommand(name string, args ...string) CommandResult {
-	output, err := exec.Command(name, args...).CombinedOutput()
-	code := 0
-	if err != nil {
-		code = 1
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			code = exitErr.ExitCode()
-		}
+	result := winapi.RunCommand(winapi.CommandOptions{
+		Name:     name,
+		Args:     args,
+		Timeout:  winapi.DefaultServiceQueryTimeout,
+		Category: failures.FailureServiceControl,
+	})
+	return CommandResult{ExitCode: result.ExitCode, Output: result.CombinedOutput(), Err: commandErr(result)}
+}
+
+func commandErr(result winapi.CommandResult) error {
+	if result.Error == "" {
+		return nil
 	}
-	return CommandResult{ExitCode: code, Output: strings.TrimSpace(string(output)), Err: err}
+	return &commandError{message: result.Error}
+}
+
+type commandError struct {
+	message string
+}
+
+func (e *commandError) Error() string {
+	return e.message
 }
 
 func parseSCStatus(output string) string {

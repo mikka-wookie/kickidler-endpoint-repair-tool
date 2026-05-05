@@ -25,6 +25,8 @@ System-modifying / destructive: `cleanup --yes`, `repair --yes`, `install --yes`
 
 Do not paste real invite values into tickets, screenshots, or shared logs. `kigrepair` output should redact invite values. Command examples must use `<INVITE>`. Support bundles should not contain raw invite values.
 
+Failure-mode rule: if a command fails before making changes, review `summary.txt`, `operations.json`, and the first failed operation. Expected blockers should return `7`; warning or partial diagnostics should return `1`; unexpected tool/report infrastructure failures should return `10`.
+
 ## 1. Basic Triage
 
 ```powershell

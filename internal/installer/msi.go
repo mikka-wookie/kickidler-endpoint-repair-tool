@@ -1,10 +1,11 @@
 package installer
 
 import (
-	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"kigrepair/internal/failures"
+	"kigrepair/internal/winapi"
 )
 
 type MSIResult struct {
@@ -19,6 +20,7 @@ type CommandResult struct {
 	ExitCode int
 	Output   string
 	Err      error
+	TimedOut bool
 }
 
 type MSIExecutor interface {
@@ -29,20 +31,20 @@ type ExecMSIExecutor struct{}
 
 func (ExecMSIExecutor) Install(installerPath string, invite string, logPath string) CommandResult {
 	args := []string{"/i", installerPath, "/qn", "/norestart", "invite=" + invite, "/l*v", logPath}
-	output, err := exec.Command("msiexec.exe", args...).CombinedOutput()
-	code := 0
-	if err != nil {
-		code = 1
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			code = exitErr.ExitCode()
-		}
-	}
-	return CommandResult{ExitCode: code, Output: strings.TrimSpace(string(output)), Err: err}
+	result := winapi.RunCommand(winapi.CommandOptions{
+		Name:          "msiexec.exe",
+		Args:          args,
+		Timeout:       winapi.DefaultMSITimeout,
+		SensitiveArgs: []string{invite},
+		Category:      failures.FailureMSI,
+	})
+	return CommandResult{ExitCode: result.ExitCode, Output: result.CombinedOutput(), Err: commandErr(result), TimedOut: result.TimedOut}
 }
 
 func ClassifyMSIInstallExitCode(code int) MSIResult {
 	switch code {
+	case -1:
+		return MSIResult{ExitCode: code, Status: "failed_timeout", Message: "MSI install timed out"}
 	case 0:
 		return MSIResult{ExitCode: code, Status: "success", Success: true, Message: "MSI install completed"}
 	case 3010:
@@ -61,7 +63,7 @@ func ClassifyMSIInstallExitCode(code int) MSIResult {
 }
 
 func MaskedMSIInstallArgs(installerPath string, logPath string) []string {
-	return []string{"/i", installerPath, "/qn", "/norestart", "invite=***", "/l*v", logPath}
+	return []string{"/i", installerPath, "/qn", "/norestart", "invite=<REDACTED>", "/l*v", logPath}
 }
 
 func MaskInviteInText(text string, invite string) string {
@@ -69,7 +71,14 @@ func MaskInviteInText(text string, invite string) string {
 	if invite == "" || text == "" {
 		return text
 	}
-	masked := strings.ReplaceAll(text, invite, "***")
-	masked = strings.ReplaceAll(masked, "invite=***", "invite=***")
+	masked := strings.ReplaceAll(text, invite, "<REDACTED>")
+	masked = strings.ReplaceAll(masked, "invite=<REDACTED>", "invite=<REDACTED>")
 	return masked
+}
+
+func commandErr(result winapi.CommandResult) error {
+	if result.Error == "" {
+		return nil
+	}
+	return fmt.Errorf("%s", result.Error)
 }

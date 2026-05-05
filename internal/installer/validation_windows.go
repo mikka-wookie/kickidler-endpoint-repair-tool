@@ -5,9 +5,10 @@ package installer
 import (
 	"encoding/json"
 	"errors"
-	"os"
-	"os/exec"
 	"strings"
+
+	"kigrepair/internal/failures"
+	"kigrepair/internal/winapi"
 )
 
 func readMSIMetadata(path string) (msiMetadata, error) {
@@ -93,15 +94,20 @@ if ($null -ne $sig.SignerCertificate) {
 }
 
 func runValidationPowerShell(path string, script string) (string, error) {
-	command := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
-	command.Env = append(os.Environ(), "KIGREPAIR_MSI_PATH="+path)
-	output, err := command.CombinedOutput()
-	text := strings.TrimSpace(string(output))
-	if err != nil {
+	result := winapi.RunCommand(winapi.CommandOptions{
+		Name:       "powershell.exe",
+		Args:       []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script},
+		Timeout:    winapi.DefaultPowerShellTimeout,
+		RedactArgs: true,
+		Env:        []string{"KIGREPAIR_MSI_PATH=" + path},
+		Category:   failures.FailurePowerShell,
+	})
+	text := strings.TrimSpace(result.CombinedOutput())
+	if result.ExitCode != 0 {
 		if text != "" {
 			return "", errors.New(text)
 		}
-		return "", err
+		return "", errors.New(result.Error)
 	}
 	return text, nil
 }
