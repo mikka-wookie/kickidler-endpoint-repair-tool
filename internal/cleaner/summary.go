@@ -126,6 +126,8 @@ func writePlannedActions(b *strings.Builder, plan CleanupPlan) {
 		b.WriteString("Planned actions:\n- No cleanup actions were required.\n\n")
 		return
 	}
+	b.WriteString(processPlanSummary(plan))
+	b.WriteString("\n")
 	b.WriteString("Planned actions:\n")
 	for _, action := range plan.Actions {
 		b.WriteString("- " + displayActionPhrase(action.Type) + ": " + action.Target + "\n")

@@ -61,7 +61,6 @@ func main() {
 	rootCmd.AddCommand(defenderCommand(opts))
 	rootCmd.AddCommand(collectReportCommand(opts))
 	rootCmd.AddCommand(verifyCommand(opts))
-	rootCmd.AddCommand(preflightCommand(opts))
 	rootCmd.AddCommand(versionCommand(opts))
 
 	if err := rootCmd.Execute(); err != nil {
@@ -93,21 +92,6 @@ func repairCommand(opts *globalOptions) *cobra.Command {
 	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
 	cmd.Flags().BoolVar(&yes, "yes", false, "confirm repair without prompting")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview repair workflow without modifying the system")
-	return cmd
-}
-
-func preflightCommand(opts *globalOptions) *cobra.Command {
-	var invite string
-	var installerPath string
-	cmd := &cobra.Command{
-		Use:   "preflight",
-		Short: "Run read-only repair preflight checks",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowWithAdmin(cmd, opts, "preflight", false, repair.PreflightWorkflow{Invite: invite, Installer: installerPath})
-		},
-	}
-	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
-	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
 	return cmd
 }
 

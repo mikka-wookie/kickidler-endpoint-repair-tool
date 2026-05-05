@@ -416,6 +416,9 @@ func healthyReport(missingDefender []string) detector.DetectionReport {
 		Processes: []detector.ProcessState{{
 			Name:           "grabber2.exe",
 			ExecutablePath: root + `\grabber2.exe`,
+			GrabberRelated: true,
+			TrustLevel:     detector.ProcessTrustNameAndPathMatch,
+			CanTerminate:   true,
 			MatchedByName:  true,
 		}},
 	}
