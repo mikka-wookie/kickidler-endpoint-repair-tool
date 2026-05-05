@@ -136,6 +136,7 @@ Invoke-Step "Building $binaryPath" {
 Invoke-Step "Copying release documentation" {
     Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path $releaseDir "README.md") -Force
     Copy-Item -LiteralPath (Join-Path $repoRoot "SUPPORT-RUNBOOK.md") -Destination (Join-Path $releaseDir "SUPPORT-RUNBOOK.md") -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot "docs") -Destination (Join-Path $releaseDir "docs") -Recurse -Force
     New-Item -ItemType Directory -Path (Join-Path $releaseDir "assets") -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repoRoot "assets\README.txt") -Destination (Join-Path $releaseDir "assets\README.txt") -Force
     New-Item -ItemType Directory -Path (Join-Path $releaseDir "examples") -Force | Out-Null
