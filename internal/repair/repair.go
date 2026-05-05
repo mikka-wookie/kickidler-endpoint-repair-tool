@@ -38,6 +38,7 @@ type RepairWorkflow struct {
 	MSIExecutor       installer.MSIExecutor
 	InstallerResolver func(string) (installer.InstallerResolution, error)
 	DefenderAdder     defender.ExclusionAdder
+	CreateRollback    func(ctx *app.AppContext, initial detector.DetectionReport, plan cleaner.CleanupPlan, decision Decision, installerPath string, hasInvite bool, isAdmin bool) (*rollback.RollbackInfo, error)
 	In                io.Reader
 	Out               io.Writer
 }
@@ -350,6 +351,9 @@ func (w RepairWorkflow) buildCleanupPlan(report detector.DetectionReport) cleane
 }
 
 func (w RepairWorkflow) createRollback(ctx *app.AppContext, initial detector.DetectionReport, plan cleaner.CleanupPlan, decision Decision, installerPath string, hasInvite bool, isAdmin bool) (*rollback.RollbackInfo, error) {
+	if w.CreateRollback != nil {
+		return w.CreateRollback(ctx, initial, plan, decision, installerPath, hasInvite, isAdmin)
+	}
 	planned := cleaner.RollbackPlannedChanges(plan, rollback.WorkflowRepair)
 	if decision.InstallNeeded {
 		planned = append(planned, rollback.PlannedChange{
