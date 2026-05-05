@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	svc "kigrepair/internal/services"
 )
 
 type InstallMode string
@@ -50,6 +52,7 @@ func EnrichDetectionReport(report DetectionReport) DetectionReport {
 	if report.InstallMode == "" {
 		report.InstallMode = InstallModeUnknown
 	}
+	report.Services = HardenServiceStates(report.System, report.Services)
 	candidate := chooseServiceInstallCandidate(report.System, report.Services)
 	if candidate == nil && report.InstallRoot == "" {
 		candidate = chooseFileInstallCandidate(report.System, report.Files)
@@ -100,14 +103,22 @@ func chooseServiceInstallCandidate(system SystemState, services []ServiceState) 
 	candidates := make([]installCandidate, 0, len(services))
 	for i := range services {
 		service := &services[i]
-		if !service.Exists || strings.TrimSpace(service.ImagePath) == "" {
+		if !service.Exists || service.TrustLevel != svc.TrustTrusted {
 			continue
 		}
-		exePath := parseServiceExecutablePath(service.ImagePath)
+		exePath := service.NormalizedExecutablePath
 		if exePath == "" {
+			exePath = parseServiceExecutablePath(service.ImagePath)
+		}
+		if exePath == "" || service.InstallRoot == "" {
 			continue
 		}
-		root, binaryDir, mode := classifyExecutablePath(system, exePath)
+		root := service.InstallRoot
+		mode := InstallMode(service.InstallMode)
+		if mode == "" {
+			mode = InstallModeUnknown
+		}
+		binaryDir := binaryDirForMode(mode, root)
 		if root == "" {
 			continue
 		}
@@ -162,40 +173,36 @@ func chooseFileInstallCandidate(system SystemState, files []FileState) *installC
 }
 
 func parseServiceExecutablePath(imagePath string) string {
-	value := strings.TrimSpace(expandWindowsEnv(imagePath))
-	value = strings.TrimPrefix(value, `\??\`)
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	if strings.HasPrefix(value, `"`) {
-		if end := strings.Index(value[1:], `"`); end >= 0 {
-			return filepath.Clean(strings.ReplaceAll(value[1:1+end], "/", `\`))
-		}
-	}
-	lower := strings.ToLower(value)
-	if idx := strings.Index(lower, ".exe"); idx >= 0 {
-		return filepath.Clean(strings.ReplaceAll(strings.TrimSpace(value[:idx+4]), "/", `\`))
-	}
-	fields := strings.Fields(value)
-	if len(fields) == 0 {
-		return ""
-	}
-	return filepath.Clean(strings.ReplaceAll(strings.Trim(fields[0], `"`), "/", `\`))
+	parsed := svc.ParseServiceImagePath(imagePath)
+	return parsed.NormalizedPath
 }
 
 func classifyExecutablePath(system SystemState, exePath string) (string, string, InstallMode) {
-	clean := filepath.Clean(strings.ReplaceAll(exePath, "/", `\`))
-	dir := filepath.Dir(clean)
+	clean := NormalizeWindowsPath(exePath)
 	if isHiddenWMIExecutable(system, clean) {
 		return hiddenWMIRoot(system), hiddenWMIBinaryDir(system), InstallModeHiddenWMI
 	}
-	mode := modeForInstallRoot(system, dir)
-	return dir, dir, mode
+	for _, root := range []string{
+		filepath.Join(system.ProgramFiles, "TeleLinkSoft"),
+		filepath.Join(system.ProgramFilesX86, "TeleLinkSoft"),
+	} {
+		if pathWithin(clean, root) {
+			return root, filepath.Join(root, "bin"), InstallModeStandard
+		}
+	}
+	for _, root := range []string{
+		filepath.Join(system.ProgramFiles, "TeleLinkSoftHelper"),
+		filepath.Join(system.ProgramFilesX86, "TeleLinkSoftHelper"),
+	} {
+		if pathWithin(clean, root) {
+			return root, root, InstallModeHelper
+		}
+	}
+	return "", "", InstallModeUnknown
 }
 
 func isHiddenWMIExecutable(system SystemState, exePath string) bool {
-	dir := filepath.Dir(filepath.Clean(strings.ReplaceAll(exePath, "/", `\`)))
+	dir := filepath.Dir(NormalizeWindowsPath(exePath))
 	if !pathsEqual(dir, hiddenWMIBinaryDir(system)) {
 		return false
 	}
@@ -205,6 +212,18 @@ func isHiddenWMIExecutable(system SystemState, exePath string) bool {
 		}
 	}
 	return false
+}
+
+func pathWithin(child, parent string) bool {
+	child = strings.ToLower(NormalizeWindowsPath(child))
+	parent = strings.ToLower(NormalizeWindowsPath(parent))
+	if child == "" || parent == "" {
+		return false
+	}
+	if child == parent {
+		return true
+	}
+	return strings.HasPrefix(child, strings.TrimRight(parent, `\`)+`\`)
 }
 
 func knownInstallRoots(system SystemState) []string {
