@@ -9,6 +9,7 @@ import (
 	"kigrepair/internal/recommendations"
 	"kigrepair/internal/rollback"
 	"kigrepair/internal/verifier"
+	"kigrepair/internal/version"
 )
 
 const (
@@ -26,6 +27,7 @@ const (
 )
 
 type RepairResult struct {
+	Build               version.Info                          `json:"build"`
 	StartedAt           time.Time                             `json:"started_at"`
 	FinishedAt          time.Time                             `json:"finished_at"`
 	Mode                string                                `json:"mode"`

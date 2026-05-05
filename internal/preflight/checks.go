@@ -17,6 +17,7 @@ import (
 	"kigrepair/internal/detector"
 	"kigrepair/internal/installer"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/version"
 	"kigrepair/internal/winapi"
 )
 
@@ -48,6 +49,7 @@ func Run(ctx *app.AppContext, opts Options, deps Dependencies) (Result, error) {
 	deps = fillDependencies(deps)
 	now := deps.Now()
 	result := Result{
+		Build:     version.Get(),
 		Command:   "preflight",
 		ReportDir: opts.OutputDir,
 		CreatedAt: now.Format(time.RFC3339),

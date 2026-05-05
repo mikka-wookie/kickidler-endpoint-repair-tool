@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"kigrepair/internal/app"
+	"kigrepair/internal/version"
 )
 
 type Reporter struct {
@@ -26,6 +27,9 @@ func (r *Reporter) WriteJSON(name string, v any) error {
 }
 
 func (r *Reporter) WriteText(name string, content string) error {
+	if strings.EqualFold(ensureExt(name, ".txt"), "summary.txt") {
+		content = version.SummaryText() + "\n" + content
+	}
 	return WriteText(filepath.Join(r.Dir, ensureExt(name, ".txt")), content)
 }
 

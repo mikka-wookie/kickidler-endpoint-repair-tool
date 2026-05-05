@@ -20,6 +20,7 @@ import (
 	"kigrepair/internal/recommendations"
 	"kigrepair/internal/rollback"
 	"kigrepair/internal/verifier"
+	"kigrepair/internal/version"
 )
 
 type CleanupExecutor interface {
@@ -50,6 +51,7 @@ func (w RepairWorkflow) Name() string {
 func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 	startedAt := time.Now()
 	result := RepairResult{
+		Build:          version.Get(),
 		StartedAt:      startedAt,
 		Mode:           string(ctx.Mode),
 		Force:          ctx.Force,

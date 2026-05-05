@@ -22,6 +22,7 @@ import (
 	"kigrepair/internal/repair"
 	"kigrepair/internal/reports"
 	"kigrepair/internal/verifier"
+	"kigrepair/internal/version"
 	"kigrepair/internal/winapi"
 )
 
@@ -318,28 +319,12 @@ func runWorkflowWithAdmin(cmd *cobra.Command, opts *globalOptions, commandName s
 	return runWorkflow(opts, workflow)
 }
 
-type versionInfo struct {
-	AppName   string `json:"app_name"`
-	Version   string `json:"version"`
-	GitCommit string `json:"git_commit"`
-	BuildDate string `json:"build_date"`
-	GOOS      string `json:"goos"`
-	GOARCH    string `json:"goarch"`
-}
-
 func versionCommand(opts *globalOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print version",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			info := versionInfo{
-				AppName:   config.AppName,
-				Version:   config.Version,
-				GitCommit: config.GitCommit,
-				BuildDate: config.BuildDate,
-				GOOS:      config.TargetOS,
-				GOARCH:    config.TargetArch,
-			}
+			info := version.Get()
 			if opts.jsonOutput {
 				encoded, err := json.MarshalIndent(info, "", "  ")
 				if err != nil {
@@ -348,10 +333,12 @@ func versionCommand(opts *globalOptions) *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), string(encoded))
 				return nil
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", info.AppName, info.Version)
-			fmt.Fprintf(cmd.OutOrStdout(), "Commit: %s\n", info.GitCommit)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", info.Tool, info.Version)
+			fmt.Fprintf(cmd.OutOrStdout(), "Commit: %s\n", info.Commit)
 			fmt.Fprintf(cmd.OutOrStdout(), "Build date: %s\n", info.BuildDate)
-			fmt.Fprintf(cmd.OutOrStdout(), "Target: %s/%s\n", info.GOOS, info.GOARCH)
+			fmt.Fprintf(cmd.OutOrStdout(), "Built by: %s\n", info.BuiltBy)
+			fmt.Fprintf(cmd.OutOrStdout(), "Go: %s\n", info.GoVersion)
+			fmt.Fprintf(cmd.OutOrStdout(), "Platform: %s/%s\n", info.OS, info.Arch)
 			return nil
 		},
 	}
