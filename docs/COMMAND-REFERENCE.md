@@ -6,6 +6,8 @@ All workflow commands except `version` write reports under:
 C:\ProgramData\kigrepair\Reports\<timestamp>\
 ```
 
+Use `--config "C:\Path\kigrepair.yaml"` to load optional support defaults. CLI flags override config values. See [Configuration](CONFIGURATION.md).
+
 ## Command Safety Classes
 
 Read-only / non-destructive except report writing:
@@ -50,6 +52,24 @@ Example:
 ```
 
 Expected exit codes: `0` success, `10` unexpected error.
+
+## config
+
+Purpose: Prints, validates, or samples optional YAML configuration.
+
+Destructive: No.
+
+Admin required: No.
+
+Examples:
+
+```powershell
+.\kigrepair.exe config sample
+.\kigrepair.exe config validate --config ".\kigrepair.yaml"
+.\kigrepair.exe config show --config ".\kigrepair.yaml" --json
+```
+
+Expected exit codes: `0` success, `4` invalid config, `10` unexpected error.
 
 ## check
 

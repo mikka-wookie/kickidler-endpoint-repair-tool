@@ -206,7 +206,14 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 		result.CleanupExecuted = true
 		executor := w.CleanupExecutor
 		if executor == nil {
-			executor = cleaner.NewExecutor(ctx.OutputDir, ctx.Logger)
+			configured := cleaner.NewExecutor(ctx.OutputDir, ctx.Logger)
+			if ctx.Config.Repair.ServiceStopTimeoutSeconds > 0 {
+				configured.ServiceTimeout = time.Duration(ctx.Config.Repair.ServiceStopTimeoutSeconds) * time.Second
+			}
+			if ctx.Config.Repair.ProcessKillTimeoutSeconds > 0 {
+				configured.ProcessTimeout = time.Duration(ctx.Config.Repair.ProcessKillTimeoutSeconds) * time.Second
+			}
+			executor = configured
 		}
 		for _, operation := range executor.ExecutePlan(plan) {
 			ctx.AddResult(operation)

@@ -203,7 +203,7 @@ func bundleSpecs() []bundleSpec {
 	for _, name := range []string{"repair.log", "msi-install.log", "msi-uninstall.log"} {
 		specs = append(specs, bundleSpec{sourceRel: name, archiveRel: "logs/" + name})
 	}
-	for _, name := range []string{"environment.json", "services.json", "processes.json", "defender.json", "registry.json"} {
+	for _, name := range []string{"config.json", "environment.json", "services.json", "processes.json", "defender.json", "registry.json"} {
 		specs = append(specs, bundleSpec{sourceRel: "system/" + name, archiveRel: "system/" + name})
 	}
 	return specs

@@ -38,6 +38,7 @@ type Executor struct {
 	Stat            func(string) (os.FileInfo, error)
 	ValidatePath    func(string) error
 	RegistryBackups bool
+	ServiceTimeout  time.Duration
 	ProcessTimeout  time.Duration
 	ProcessPoll     time.Duration
 }
@@ -51,6 +52,7 @@ func NewExecutor(outputDir string, logger app.Logger) Executor {
 		Stat:            os.Lstat,
 		ValidatePath:    safety.ValidateCleanupPath,
 		RegistryBackups: true,
+		ServiceTimeout:  svc.DefaultStopTimeout,
 		ProcessTimeout:  10 * time.Second,
 		ProcessPoll:     500 * time.Millisecond,
 	}
@@ -99,7 +101,7 @@ func (e Executor) stopService(action CleanupAction) app.OperationResult {
 		e.Logger.Info("executing command: sc.exe stop %s", action.Target)
 	}
 	started := time.Now()
-	result := svc.StopService(context.Background(), action.Target, svc.StopOptions{Runner: serviceRunner(e.RunCommand)})
+	result := svc.StopService(context.Background(), action.Target, svc.StopOptions{Runner: serviceRunner(e.RunCommand), Timeout: e.ServiceTimeout})
 	e.logServiceAction(result, time.Since(started))
 	return serviceOperation(action.Type, action.Target, result)
 }

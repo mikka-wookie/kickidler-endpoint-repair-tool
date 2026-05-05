@@ -315,6 +315,12 @@ func (w CleanupWorkflow) runRealCleanup(ctx *app.AppContext, initial detector.De
 	}
 
 	executor := NewExecutor(ctx.OutputDir, ctx.Logger)
+	if ctx.Config.Repair.ServiceStopTimeoutSeconds > 0 {
+		executor.ServiceTimeout = time.Duration(ctx.Config.Repair.ServiceStopTimeoutSeconds) * time.Second
+	}
+	if ctx.Config.Repair.ProcessKillTimeoutSeconds > 0 {
+		executor.ProcessTimeout = time.Duration(ctx.Config.Repair.ProcessKillTimeoutSeconds) * time.Second
+	}
 	executionStart := len(ctx.Results)
 	for _, result := range executor.ExecutePlan(plan) {
 		ctx.AddResult(result)
