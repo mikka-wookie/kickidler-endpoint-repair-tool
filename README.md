@@ -2,22 +2,15 @@
 
 `kigrepair` is a Windows-focused Kickidler support utility for Grabber diagnostics, cleanup, install, repair, Defender exclusion validation, verification, and support bundle collection.
 
-The tool is CLI-first and intended for technical support engineers. It writes auditable reports under:
+The tool is CLI-first and intended for technical support engineers. Workflow reports are written under:
 
 ```text
 C:\ProgramData\kigrepair\Reports\<timestamp>\
 ```
 
-## Supported OS
-
-- Windows endpoints
-- Go development target: Windows amd64 release builds
-
-System-changing commands require administrator rights. Interactive mode can request standard Windows UAC elevation. Quiet or non-interactive automation must already run from an elevated shell.
-
 ## Safety
 
-Read-only/non-destructive commands, except for report writing:
+Read-only / non-destructive except report writing:
 
 - `check`
 - `verify`
@@ -26,49 +19,49 @@ Read-only/non-destructive commands, except for report writing:
 - `cleanup --dry-run`
 - `collect-report`
 - `reports list`
+- `reports cleanup --dry-run`
+- `version`
 
-System-changing commands:
+System-modifying / destructive:
 
-- `cleanup`
-- `repair`
-- `defender --ensure`
-- `install`
+- `cleanup --yes`
+- `repair --yes`
+- `install --yes`
+- `defender ensure --yes` using `.\kigrepair.exe defender --ensure --yes`
 - `reports cleanup --yes`
 
-Cleanup, repair, Defender changes, MSI install/uninstall, process termination, service changes, registry cleanup, and report cleanup are logged and reported. Invite values must not be printed, logged, committed, or included in tickets. Command examples use `<INVITE>`.
+Do not paste real invite values into tickets, screenshots, or shared logs. `kigrepair` output should redact invite values. Command examples must use `<INVITE>`. Support bundles should not contain raw invite values.
 
 ## Common Commands
 
 ```powershell
 .\kigrepair.exe version
-.\kigrepair.exe version --json
 .\kigrepair.exe check
 .\kigrepair.exe verify
 .\kigrepair.exe preflight --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
-.\kigrepair.exe cleanup --dry-run
 .\kigrepair.exe repair --dry-run --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
 .\kigrepair.exe repair --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>" --yes
 .\kigrepair.exe collect-report
-.\kigrepair.exe reports list
-.\kigrepair.exe reports cleanup --dry-run
 ```
 
-## Reports
+The support bundle is written as:
 
-Each workflow command except `version` writes a timestamped report directory. Common files include:
+```text
+kigrepair-support-bundle.zip
+```
 
-- `summary.txt`
-- `operations.json`
-- `repair.log`
-- `initial-detection.json`
-- `final-detection.json`
-- `verification-result.json`
-- `preflight-result.json`
-- `repair-result.json`
-- `collect-result.json`
-- `kigrepair-support-bundle.zip`
+## Support Documentation
 
-`summary.txt`, key workflow result JSON files, and support bundle manifests include build metadata so support can identify the exact binary used.
+- [Support KB](docs/SUPPORT-KB.md)
+- [Command Reference](docs/COMMAND-REFERENCE.md)
+- [Report Files](docs/REPORT-FILES.md)
+- [Classifications](docs/CLASSIFICATIONS.md)
+- [Exit Codes](docs/EXIT-CODES.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Escalation Checklist](docs/ESCALATION-CHECKLIST.md)
+- [Safety Model](docs/SAFETY-MODEL.md)
+- [Release Checklist](docs/RELEASE-CHECKLIST.md)
+- [Short Support Runbook](SUPPORT-RUNBOOK.md)
 
 ## MSI Assets
 
@@ -82,46 +75,6 @@ Release packages include an empty `assets\` folder with instructions. Place a su
 
 Do not place invite values in files.
 
-## Support Bundles
-
-Run:
-
-```powershell
-.\kigrepair.exe collect-report
-```
-
-The support bundle is written to the active report directory as:
-
-```text
-kigrepair-support-bundle.zip
-```
-
-Attach this ZIP to escalation tickets. Do not include invite values in ticket notes.
-
-## Exit Codes
-
-Standard workflow exit codes:
-
-- `0` - success
-- `1` - completed with warnings
-- `2` - administrator rights required
-- `3` - confirmation declined or missing
-- `4` - invalid input
-- `5` - cleanup failed
-- `6` - install failed
-- `7` - final verification failed
-- `8` - Defender ensure failed
-- `9` - reboot required
-- `10` - unexpected error
-
-`check` health-oriented exit codes:
-
-- `0` - healthy
-- `1` - not installed
-- `2` - broken
-- `3` - partially removed
-- `4` - unknown
-
 ## Release Build
 
 From the repository root:
@@ -130,32 +83,16 @@ From the repository root:
 .\scripts\build-release.ps1 -Version 0.1.0
 ```
 
-If local PowerShell execution policy blocks direct script execution, run:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version 0.1.0
-```
-
-The script runs `gofmt -w .`, `go mod tidy`, `go test ./...`, and a Windows amd64 build with linker-injected metadata. It creates:
+The script runs formatting, dependency tidy, tests, and a Windows amd64 build with linker-injected metadata. It creates:
 
 ```text
 dist\kigrepair-0.1.0-windows-amd64\
 dist\kigrepair-0.1.0-windows-amd64.zip
 ```
 
-Release folder layout:
+Release folder layout includes `kigrepair.exe`, `README.md`, `SUPPORT-RUNBOOK.md`, `docs\`, `assets\README.txt`, `examples\commands.ps1`, and checksums.
 
-```text
-kigrepair.exe
-README.md
-SUPPORT-RUNBOOK.md
-checksums.txt
-checksums.json
-assets\README.txt
-examples\commands.ps1
-```
-
-The release script does not bundle Grabber MSI installers. It creates an `assets\` folder for support engineers to populate locally when needed.
+The release script does not bundle Grabber MSI installers. Support engineers must place approved MSI files locally when needed.
 
 ## Development Validation
 
