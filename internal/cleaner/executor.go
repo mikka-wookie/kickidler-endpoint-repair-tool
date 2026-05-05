@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sys/windows/registry"
-
 	"kigrepair/internal/app"
 	"kigrepair/internal/config"
 	"kigrepair/internal/detector"
@@ -40,6 +38,8 @@ type Executor struct {
 	Stat            func(string) (os.FileInfo, error)
 	ValidatePath    func(string) error
 	RegistryBackups bool
+	NativeServices  bool
+	NativeProcesses bool
 	ServiceTimeout  time.Duration
 	ProcessTimeout  time.Duration
 	ProcessPoll     time.Duration
@@ -54,6 +54,8 @@ func NewExecutor(outputDir string, logger app.Logger) Executor {
 		Stat:            os.Lstat,
 		ValidatePath:    safety.ValidateCleanupPath,
 		RegistryBackups: true,
+		NativeServices:  true,
+		NativeProcesses: true,
 		ServiceTimeout:  svc.DefaultStopTimeout,
 		ProcessTimeout:  10 * time.Second,
 		ProcessPoll:     500 * time.Millisecond,
@@ -100,20 +102,28 @@ func (e Executor) ExecuteAction(action CleanupAction) app.OperationResult {
 
 func (e Executor) stopService(action CleanupAction) app.OperationResult {
 	if e.Logger != nil {
-		e.Logger.Info("executing command: sc.exe stop %s", action.Target)
+		e.Logger.Info("stopping service through native Windows API: %s", action.Target)
 	}
 	started := time.Now()
-	result := svc.StopService(context.Background(), action.Target, svc.StopOptions{Runner: serviceRunner(e.RunCommand), Timeout: e.ServiceTimeout})
+	var runner svc.CommandRunner
+	if !e.NativeServices {
+		runner = serviceRunner(e.RunCommand)
+	}
+	result := svc.StopService(context.Background(), action.Target, svc.StopOptions{Runner: runner, Timeout: e.ServiceTimeout})
 	e.logServiceAction(result, time.Since(started))
 	return serviceOperation(action.Type, action.Target, result)
 }
 
 func (e Executor) deleteService(action CleanupAction) app.OperationResult {
 	if e.Logger != nil {
-		e.Logger.Info("executing command: sc.exe delete %s", action.Target)
+		e.Logger.Info("deleting service through native Windows API: %s", action.Target)
 	}
 	started := time.Now()
-	result := svc.DeleteService(context.Background(), action.Target, svc.DeleteOptions{Runner: serviceRunner(e.RunCommand), AllowStop: false})
+	var runner svc.CommandRunner
+	if !e.NativeServices {
+		runner = serviceRunner(e.RunCommand)
+	}
+	result := svc.DeleteService(context.Background(), action.Target, svc.DeleteOptions{Runner: runner, AllowStop: false})
 	e.logServiceAction(result, time.Since(started))
 	return serviceOperation(action.Type, action.Target, result)
 }
@@ -131,7 +141,7 @@ func (e Executor) killProcess(action CleanupAction) app.OperationResult {
 	if pid <= 0 {
 		return operation(action.Type, action.Target, app.OperationStatusFailed, "Cleanup plan does not contain a valid PID", "")
 	}
-	current, err := currentProcess(e.RunCommand, pid)
+	current, err := e.currentProcess(pid)
 	if err != nil {
 		return operation(action.Type, action.Target, app.OperationStatusFailed, "Could not re-query process before termination", err.Error())
 	}
@@ -142,20 +152,33 @@ func (e Executor) killProcess(action CleanupAction) app.OperationResult {
 		return operation(action.Type, action.Target, app.OperationStatusFailed, "Process no longer matches cleanup plan", err.Error())
 	}
 	if e.Logger != nil {
-		e.Logger.Info("executing command: taskkill /PID %d /F", pid)
+		e.Logger.Info("terminating process through native Windows API: PID %d", pid)
 	}
 	started := time.Now()
-	result := e.RunCommand("taskkill.exe", "/PID", strconv.Itoa(pid), "/F")
-	e.logCommandResult("taskkill.exe", result, time.Since(started))
-	if result.ExitCode != 0 {
-		message := "Process termination failed"
-		if result.TimedOut {
-			message = "Process termination timed out"
+	if e.NativeProcesses {
+		if err := winapi.TerminateProcessByPID(context.Background(), pid); err != nil {
+			message := "Process termination failed"
+			if strings.Contains(strings.ToLower(err.Error()), "access is denied") || strings.Contains(strings.ToLower(err.Error()), "access denied") {
+				message = "Process termination failed: run as Administrator"
+			}
+			return operation(action.Type, action.Target, app.OperationStatusFailed, message, err.Error())
 		}
-		if strings.Contains(strings.ToLower(result.Output), "access is denied") || strings.Contains(strings.ToLower(result.Output), "access denied") {
-			message = "Process termination failed: run as Administrator"
+		if e.Logger != nil {
+			e.Logger.Info("native process termination duration: %s", time.Since(started).Round(time.Millisecond))
 		}
-		return operation(action.Type, action.Target, app.OperationStatusFailed, message, resultError(result))
+	} else {
+		result := e.RunCommand("taskkill.exe", "/PID", strconv.Itoa(pid), "/F")
+		e.logCommandResult("taskkill.exe", result, time.Since(started))
+		if result.ExitCode != 0 {
+			message := "Process termination failed"
+			if result.TimedOut {
+				message = "Process termination timed out"
+			}
+			if strings.Contains(strings.ToLower(result.Output), "access is denied") || strings.Contains(strings.ToLower(result.Output), "access denied") {
+				message = "Process termination failed: run as Administrator"
+			}
+			return operation(action.Type, action.Target, app.OperationStatusFailed, message, resultError(result))
+		}
 	}
 	if waitErr := e.waitForProcessExit(pid); waitErr != nil {
 		return operation(action.Type, action.Target, app.OperationStatusFailed, "Timed out waiting for process to exit", waitErr.Error())
@@ -225,7 +248,7 @@ func (e Executor) deleteRegistryKey(action CleanupAction) app.OperationResult {
 	} else if e.Logger != nil {
 		e.Logger.Warn("Registry backup not implemented for this key: %s", action.Target)
 	}
-	if err := deleteRegistryTree(root, path); err != nil {
+	if err := winapi.DeleteRegistryTree(context.Background(), root, path); err != nil {
 		return operation(action.Type, action.Target, app.OperationStatusFailed, "Registry key deletion failed", err.Error())
 	}
 	return operation(action.Type, action.Target, app.OperationStatusSuccess, "Registry key deleted", "")
@@ -347,6 +370,25 @@ func resultError(result CommandResult) string {
 	return fmt.Sprintf("exit code %d", result.ExitCode)
 }
 
+func (e Executor) currentProcess(pid int) (*detector.ProcessState, error) {
+	if e.NativeProcesses {
+		process, err := winapi.QueryProcess(context.Background(), pid)
+		if err == nil {
+			if process == nil {
+				return nil, nil
+			}
+			classified := detector.ClassifyProcess(detector.RawProcessInfo{
+				ProcessID:      process.ProcessID,
+				Name:           process.Name,
+				ExecutablePath: process.ExecutablePath,
+				CommandLine:    process.CommandLine,
+			}, detector.MatchOptions{})
+			return &classified, nil
+		}
+	}
+	return currentProcess(e.RunCommand, pid)
+}
+
 func currentProcess(run CommandRunner, pid int) (*detector.ProcessState, error) {
 	// MVP implementation: uses PowerShell/CIM for process path verification. Keep
 	// this isolated so it can later be replaced with native Windows process APIs.
@@ -377,7 +419,7 @@ func (e Executor) waitForProcessExit(pid int) error {
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		current, err := currentProcess(e.RunCommand, pid)
+		current, err := e.currentProcess(pid)
 		if err != nil {
 			return err
 		}
@@ -458,47 +500,25 @@ func allowedRegistryTargets() []string {
 	}
 }
 
-func splitRegistryTarget(target string) (registry.Key, string, error) {
+func splitRegistryTarget(target string) (string, string, error) {
 	parts := strings.SplitN(target, `\`, 2)
 	if len(parts) != 2 {
-		return 0, "", fmt.Errorf("registry target must include root and path")
+		return "", "", fmt.Errorf("registry target must include root and path")
 	}
 	switch strings.ToUpper(parts[0]) {
 	case "HKCU":
-		return registry.CURRENT_USER, parts[1], nil
+		return "HKCU", parts[1], nil
 	case "HKLM":
-		return registry.LOCAL_MACHINE, parts[1], nil
+		return "HKLM", parts[1], nil
 	case "HKCR":
-		return registry.CLASSES_ROOT, parts[1], nil
+		return "HKCR", parts[1], nil
 	default:
-		return 0, "", fmt.Errorf("unsupported registry root %q", parts[0])
+		return "", "", fmt.Errorf("unsupported registry root %q", parts[0])
 	}
 }
 
-func registryKeyExists(root registry.Key, path string) bool {
-	key, err := registry.OpenKey(root, path, registry.QUERY_VALUE)
-	if err != nil {
-		return false
-	}
-	key.Close()
-	return true
-}
-
-func deleteRegistryTree(root registry.Key, path string) error {
-	key, err := registry.OpenKey(root, path, registry.ENUMERATE_SUB_KEYS|registry.QUERY_VALUE|registry.SET_VALUE)
-	if err == nil {
-		subkeys, readErr := key.ReadSubKeyNames(-1)
-		key.Close()
-		if readErr != nil {
-			return readErr
-		}
-		for _, subkey := range subkeys {
-			if err := deleteRegistryTree(root, path+`\`+subkey); err != nil {
-				return err
-			}
-		}
-	}
-	return registry.DeleteKey(root, path)
+func registryKeyExists(root string, path string) bool {
+	return winapi.QueryRegistryKey(context.Background(), root, path, winapi.RegistryViewDefault).Exists
 }
 
 func exportRegistryKey(run CommandRunner, outputDir string, target string) error {

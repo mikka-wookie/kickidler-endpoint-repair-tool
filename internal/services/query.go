@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"regexp"
 	"strings"
 
@@ -11,6 +12,13 @@ import (
 
 func QueryService(name string, runner CommandRunner) ServiceInfo {
 	if runner == nil {
+		info, err := winapi.QueryServiceNative(context.Background(), name)
+		if err == nil {
+			return serviceInfoFromNative(info)
+		}
+		if info.Error != "" || info.PermissionError {
+			return serviceInfoFromNative(info)
+		}
 		runner = RunCommand
 	}
 	query := runner("sc.exe", "query", name)
@@ -37,6 +45,18 @@ func QueryService(name string, runner CommandRunner) ServiceInfo {
 	startType := parseSCValue(qc.Output, "START_TYPE")
 	imagePath := parseSCValue(qc.Output, "BINARY_PATH_NAME")
 	return ClassifyService(name, true, state, startType, imagePath, "")
+}
+
+func serviceInfoFromNative(info winapi.NativeServiceInfo) ServiceInfo {
+	if !info.Exists && info.Error == "" {
+		return ClassifyService(info.Name, false, "", "", "", "")
+	}
+	service := ClassifyService(info.Name, info.Exists, info.State, info.StartType, info.BinaryPathName, info.Error)
+	if info.PermissionError {
+		service.TrustLevel = TrustQueryFailed
+		service.Warnings = append(service.Warnings, "Run as Administrator")
+	}
+	return service
 }
 
 func QuerySupportedServices(runner CommandRunner) []ServiceInfo {
