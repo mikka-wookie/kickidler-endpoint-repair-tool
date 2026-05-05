@@ -141,6 +141,7 @@ Invoke-Step "Copying release documentation" {
     Copy-Item -LiteralPath (Join-Path $repoRoot "assets\README.txt") -Destination (Join-Path $releaseDir "assets\README.txt") -Force
     New-Item -ItemType Directory -Path (Join-Path $releaseDir "examples") -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repoRoot "examples\commands.ps1") -Destination (Join-Path $releaseDir "examples\commands.ps1") -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot "examples\kigrepair.sample.yaml") -Destination (Join-Path $releaseDir "examples\kigrepair.sample.yaml") -Force
 }
 
 Invoke-Step "Generating executable checksum" {
@@ -169,6 +170,7 @@ Invoke-Step "Validating release binary metadata" {
     & $binaryPath check --help | Out-Null
     & $binaryPath repair --help | Out-Null
     & $binaryPath reports --help | Out-Null
+    & $binaryPath config sample | Out-Null
 }
 
 Write-Host ""

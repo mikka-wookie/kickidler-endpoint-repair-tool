@@ -36,6 +36,7 @@ Do not paste real invite values into tickets, screenshots, or shared logs. `kigr
 
 ```powershell
 .\kigrepair.exe version
+.\kigrepair.exe config sample
 .\kigrepair.exe check
 .\kigrepair.exe verify
 .\kigrepair.exe preflight --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
@@ -54,6 +55,7 @@ kigrepair-support-bundle.zip
 
 - [Support KB](docs/SUPPORT-KB.md)
 - [Command Reference](docs/COMMAND-REFERENCE.md)
+- [Configuration](docs/CONFIGURATION.md)
 - [Report Files](docs/REPORT-FILES.md)
 - [Classifications](docs/CLASSIFICATIONS.md)
 - [Exit Codes](docs/EXIT-CODES.md)
@@ -90,7 +92,7 @@ dist\kigrepair-0.1.0-windows-amd64\
 dist\kigrepair-0.1.0-windows-amd64.zip
 ```
 
-Release folder layout includes `kigrepair.exe`, `README.md`, `SUPPORT-RUNBOOK.md`, `docs\`, `assets\README.txt`, `examples\commands.ps1`, and checksums.
+Release folder layout includes `kigrepair.exe`, `README.md`, `SUPPORT-RUNBOOK.md`, `docs\`, `assets\README.txt`, `examples\commands.ps1`, `examples\kigrepair.sample.yaml`, and checksums.
 
 The release script does not bundle Grabber MSI installers. Support engineers must place approved MSI files locally when needed.
 

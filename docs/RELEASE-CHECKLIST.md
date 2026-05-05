@@ -68,10 +68,12 @@ dist/
       ESCALATION-CHECKLIST.md
       SAFETY-MODEL.md
       RELEASE-CHECKLIST.md
+      CONFIGURATION.md
     assets/
       README.txt
     examples/
       commands.ps1
+      kigrepair.sample.yaml
     checksums.txt
     checksums.json
 ```
@@ -83,6 +85,8 @@ dist/
 .\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe check --help
 .\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe repair --help
 .\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe reports --help
+.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe config sample
+.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe config validate --config ".\dist\kigrepair-0.1.0-windows-amd64\examples\kigrepair.sample.yaml"
 ```
 
 ## Documentation Checks
@@ -94,6 +98,7 @@ dist/
 - Verify all examples use `<INVITE>`.
 - Verify `assets\README.txt` is present.
 - Verify `examples\commands.ps1` is present.
+- Verify `examples\kigrepair.sample.yaml` is present and contains no invite or secrets.
 
 ## Final Review
 

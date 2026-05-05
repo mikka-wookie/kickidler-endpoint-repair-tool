@@ -8,6 +8,15 @@ Reports are written under:
 C:\ProgramData\kigrepair\Reports\<timestamp>\
 ```
 
+Optional team defaults can be placed in `kigrepair.yaml`:
+
+```powershell
+.\kigrepair.exe config sample > .\kigrepair.yaml
+.\kigrepair.exe config validate --config ".\kigrepair.yaml"
+```
+
+Never store invite values or secrets in configuration.
+
 ## Safety
 
 Read-only / non-destructive except report writing: `check`, `verify`, `preflight`, `repair --dry-run`, `cleanup --dry-run`, `collect-report`, `reports list`, `reports cleanup --dry-run`, `version`.

@@ -1,0 +1,46 @@
+schema_version: 1
+profile: standard
+
+reports:
+  root: "C:\\ProgramData\\kigrepair\\Reports"
+  retention_days: 30
+  keep_last: 10
+
+installer:
+  lookup_paths:
+    - ".\\assets"
+  preferred_names:
+    - grabberEM.x64.msi
+    - grabberTT.x64.msi
+    - grabberEM.x32.msi
+    - grabberTT.x32.msi
+    - grabber.msi
+  require_validation: true
+  signature_policy: warn
+
+logging:
+  level: info
+  console: true
+  include_debug: false
+
+defender:
+  ensure_before_install: true
+  missing_policy: fail_before_install
+  query_timeout_seconds: 30
+
+repair:
+  require_preflight: true
+  require_rollback_snapshot: true
+  stop_on_defender_ensure_failure: true
+  service_stop_timeout_seconds: 30
+  process_kill_timeout_seconds: 10
+
+bundle:
+  redaction_enabled: true
+  include_system: true
+  include_msi_logs: true
+
+wizard:
+  collect_bundle_on_failure: true
+  offer_repair: true
+  verify_after_repair: true

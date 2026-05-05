@@ -1,5 +1,14 @@
 # kigrepair Troubleshooting
 
+For configuration problems, start with:
+
+```powershell
+.\kigrepair.exe config validate --config ".\kigrepair.yaml"
+.\kigrepair.exe config show --config ".\kigrepair.yaml"
+```
+
+Config files must not contain `invite`, tokens, passwords, authorization headers, or secrets.
+
 Reports are written under `C:\ProgramData\kigrepair\Reports\<timestamp>\`. Attach `kigrepair-support-bundle.zip` when escalating.
 
 ## Command Safety Classes

@@ -8,6 +8,8 @@ Reports are written under:
 C:\ProgramData\kigrepair\Reports\<timestamp>\
 ```
 
+Optional YAML configuration can change defaults such as report root, retention, installer lookup paths, logging, bundle collection, and wizard behavior. It cannot store invite values or secrets, and CLI flags override config values. Built-in defaults remain safe when no config file exists.
+
 ## Command Safety Classes
 
 Read-only / non-destructive except report writing:
