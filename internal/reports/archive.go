@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"kigrepair/internal/safety"
+	"kigrepair/internal/version"
 )
 
 const SupportBundleName = "kigrepair-support-bundle.zip"
@@ -31,6 +32,7 @@ type ArchiveResult struct {
 
 type BundleManifest struct {
 	Tool             string       `json:"tool"`
+	Build            version.Info `json:"build"`
 	BundleVersion    int          `json:"bundle_version"`
 	CreatedAt        time.Time    `json:"created_at"`
 	ReportDir        string       `json:"report_dir"`
@@ -91,7 +93,8 @@ func buildSupportBundle(dir string) (ArchiveResult, []bundleEntry, BundleManifes
 	result.Errors = append(result.Errors, errorsList...)
 
 	manifest := BundleManifest{
-		Tool:             "kigrepair",
+		Tool:             version.ToolName,
+		Build:            version.Get(),
 		BundleVersion:    1,
 		CreatedAt:        time.Now().UTC(),
 		ReportDir:        dir,
@@ -178,11 +181,15 @@ func bundleSpecs() []bundleSpec {
 		"initial-detection.json",
 		"final-detection.json",
 		"operations.json",
+		"rollback-info.json",
 		"cleanup-plan.json",
+		"cleanup-result.json",
 		"install-result.json",
 		"defender-result.json",
 		"repair-result.json",
 		"verification-result.json",
+		"preflight-result.json",
+		"classification-result.json",
 		"recommendation-result.json",
 		"classification-result.json",
 		"installer-validation.json",

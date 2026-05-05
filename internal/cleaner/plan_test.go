@@ -10,11 +10,23 @@ import (
 
 func TestBuildPlanPlansServiceActions(t *testing.T) {
 	plan := BuildPlan(detector.DetectionReport{
-		Services: []detector.ServiceState{{Name: "ngs", Exists: true}},
+		Services: []detector.ServiceState{{Name: "ngs", Exists: true, Status: "running", TrustLevel: "trusted", NormalizedExecutablePath: `C:\Program Files\TeleLinkSoft\bin\grabber2.exe`}},
 	}, testPlanOptions(nil, nil))
 
 	assertAction(t, plan, CleanupActionStopService, "ngs")
 	assertAction(t, plan, CleanupActionDeleteService, "ngs")
+}
+
+func TestBuildPlanSkipsPathMismatchServiceActions(t *testing.T) {
+	plan := BuildPlan(detector.DetectionReport{
+		Services: []detector.ServiceState{{Name: "ngs", Exists: true, TrustLevel: "path_mismatch", NormalizedExecutablePath: `C:\Unexpected\service.exe`}},
+	}, testPlanOptions(nil, nil))
+
+	assertNoAction(t, plan, CleanupActionStopService, "ngs")
+	assertNoAction(t, plan, CleanupActionDeleteService, "ngs")
+	if len(plan.Warnings) != 1 {
+		t.Fatalf("expected warning for skipped service, got %#v", plan.Warnings)
+	}
 }
 
 func TestBuildPlanPlansProcessAction(t *testing.T) {
@@ -23,10 +35,30 @@ func TestBuildPlanPlansProcessAction(t *testing.T) {
 			Name:           "grabber2.exe",
 			PID:            1234,
 			ExecutablePath: `C:\Program Files\TeleLinkSoft\bin\grabber2.exe`,
+			GrabberRelated: true,
+			TrustLevel:     detector.ProcessTrustNameAndPathMatch,
+			CanTerminate:   true,
 		}},
 	}, testPlanOptions(nil, nil))
 
 	assertAction(t, plan, CleanupActionKillProcess, `grabber2.exe PID 1234 C:\Program Files\TeleLinkSoft\bin\grabber2.exe`)
+}
+
+func TestBuildPlanSkipsUnsafeProcessAction(t *testing.T) {
+	plan := BuildPlan(detector.DetectionReport{
+		Processes: []detector.ProcessState{{
+			Name:           "svchost.exe",
+			PID:            888,
+			ExecutablePath: `C:\Windows\System32\svchost.exe`,
+			TrustLevel:     detector.ProcessTrustPathMismatch,
+			MatchReason:    "normal Windows process, not Grabber hidden WMI path",
+		}},
+	}, testPlanOptions(nil, nil))
+
+	assertNoAction(t, plan, CleanupActionKillProcess, `svchost.exe PID 888 C:\Windows\System32\svchost.exe`)
+	if len(plan.Warnings) != 1 {
+		t.Fatalf("warnings = %#v, want one skipped process warning", plan.Warnings)
+	}
 }
 
 func TestBuildPlanPlansExistingFolderAction(t *testing.T) {

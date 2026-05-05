@@ -122,9 +122,11 @@ func FormatSummary(report detector.DetectionReport, classification classifier.Cl
 	b.WriteString("Service status: " + serviceStatus(report) + "\n")
 	b.WriteString("Service executable: " + valueOrDash(report.ServiceExecutablePath) + "\n")
 	b.WriteString("Defender exclusion: " + defenderExclusionStatus(report) + "\n\n")
+	b.WriteString("Processes: " + processStatusLine(report) + "\n\n")
 	if coveredBy := defenderCoveredBy(report); coveredBy != "" {
 		b.WriteString("Covered by: " + coveredBy + "\n\n")
 	}
+	writeServiceDetails(&b, report)
 	b.WriteString(classifier.FormatSection(classification))
 	b.WriteString("\n")
 	if len(report.Issues) > 0 {
@@ -161,6 +163,53 @@ func FormatSummary(report detector.DetectionReport, classification classifier.Cl
 		Errors:         report.Issues,
 		Actions:        []string{"Detection completed with health: " + string(report.Health)},
 	}, b.String()+recommendations.FormatSection(recommendation))
+}
+
+func processStatusLine(report detector.DetectionReport) string {
+	trusted := 0
+	skipped := 0
+	for _, process := range report.Processes {
+		if detector.TrustedProcessForTermination(process) {
+			trusted++
+			continue
+		}
+		if len(process.Warnings) > 0 || process.TrustLevel == detector.ProcessTrustPathMismatch || process.TrustLevel == detector.ProcessTrustPathUnavailable {
+			skipped++
+		}
+	}
+	return fmt.Sprintf("%d trusted Grabber processes detected, %d skipped unsafe name match.", trusted, skipped)
+}
+
+func writeServiceDetails(b *strings.Builder, report detector.DetectionReport) {
+	if len(report.Services) == 0 {
+		return
+	}
+	b.WriteString("Services\n")
+	b.WriteString("--------\n")
+	for _, service := range report.Services {
+		b.WriteString(service.Name + ":\n")
+		b.WriteString("  Exists: " + yesNo(service.Exists) + "\n")
+		if !service.Exists {
+			continue
+		}
+		b.WriteString("  State: " + valueOrDash(service.Status) + "\n")
+		b.WriteString("  ImagePath: " + valueOrDash(service.ImagePath) + "\n")
+		b.WriteString("  Executable: " + valueOrDash(service.NormalizedExecutablePath) + "\n")
+		b.WriteString("  Trust: " + valueOrDash(service.TrustLevel) + "\n")
+		b.WriteString("  Install mode: " + valueOrDash(service.InstallMode) + "\n")
+		b.WriteString("  Install root: " + valueOrDash(service.InstallRoot) + "\n")
+		for _, warning := range service.Warnings {
+			b.WriteString("  Warning: " + warning + "\n")
+		}
+	}
+	b.WriteString("\n")
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
 }
 
 func ptr[T any](value T) *T {

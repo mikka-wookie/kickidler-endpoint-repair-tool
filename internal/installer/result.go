@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"kigrepair/internal/app"
+	"kigrepair/internal/rollback"
 	"kigrepair/internal/verifier"
 )
 
@@ -21,6 +22,7 @@ type InstallResult struct {
 	FinalInstallMode string                       `json:"final_install_mode"`
 	FinalInstallRoot string                       `json:"final_install_root"`
 	Verification     *verifier.VerificationResult `json:"verification_result,omitempty"`
+	Rollback         *rollback.Summary            `json:"rollback,omitempty"`
 	Warnings         []string                     `json:"warnings"`
 	Errors           []string                     `json:"errors"`
 	ReportDir        string                       `json:"report_dir"`

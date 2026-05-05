@@ -13,6 +13,7 @@ import (
 	"kigrepair/internal/logging"
 	"kigrepair/internal/recommendations"
 	"kigrepair/internal/reports"
+	"kigrepair/internal/version"
 )
 
 type Collector interface {
@@ -37,6 +38,7 @@ func (w CollectReportWorkflow) Name() string {
 func (w CollectReportWorkflow) Run(ctx *app.AppContext) error {
 	startedAt := time.Now()
 	result := CollectReportResult{
+		Build:            version.Get(),
 		StartedAt:        startedAt,
 		Mode:             string(ctx.Mode),
 		ReportDir:        ctx.OutputDir,

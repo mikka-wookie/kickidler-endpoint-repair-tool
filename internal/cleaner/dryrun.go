@@ -1,6 +1,7 @@
 package cleaner
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,13 +16,15 @@ func FormatDryRunSummary(report detector.DetectionReport, plan CleanupPlan, ctx 
 	b.WriteString("Health before cleanup: " + string(report.Health) + "\n")
 	b.WriteString("Install mode: " + string(report.InstallMode) + "\n")
 	b.WriteString("Install root: " + valueOrDash(report.InstallRoot) + "\n\n")
+	b.WriteString(processPlanSummary(plan))
+	b.WriteString("\n")
 
 	if len(plan.Actions) == 0 {
 		b.WriteString("No cleanup actions were required.\n\n")
 	} else {
 		b.WriteString("Planned actions:\n")
 		for _, action := range plan.Actions {
-			b.WriteString("- Would " + actionPhrase(action.Type) + ": " + action.Target + "\n")
+			b.WriteString("- Would " + actionPhrase(action.Type) + ": " + action.Target + actionDetails(action) + "\n")
 		}
 		b.WriteString("\n")
 	}
@@ -62,15 +65,53 @@ func FormatDryRunSummary(report detector.DetectionReport, plan CleanupPlan, ctx 
 	}, b.String())
 }
 
+func processPlanSummary(plan CleanupPlan) string {
+	terminate := 0
+	skipped := 0
+	for _, action := range plan.Actions {
+		if action.Type == CleanupActionKillProcess {
+			terminate++
+		}
+	}
+	for _, warning := range plan.Warnings {
+		if strings.Contains(strings.ToLower(warning), "skipped unsafe process") {
+			skipped++
+		}
+	}
+	return "Process cleanup plan: " + pluralCount(terminate, "trusted process", "trusted processes") + " would be terminated. " + pluralCount(skipped, "unsafe name match", "unsafe name matches") + " skipped.\n"
+}
+
+func pluralCount(count int, one string, many string) string {
+	word := many
+	if count == 1 {
+		word = one
+	}
+	return strconv.Itoa(count) + " " + word
+}
+
 func dryRunActions(plan CleanupPlan) []string {
 	if len(plan.Actions) == 0 {
 		return []string{"No cleanup actions were required"}
 	}
 	actions := make([]string, 0, len(plan.Actions))
 	for _, action := range plan.Actions {
-		actions = append(actions, "Would "+actionPhrase(action.Type)+": "+action.Target)
+		actions = append(actions, "Would "+actionPhrase(action.Type)+": "+action.Target+actionDetails(action))
 	}
 	return actions
+}
+
+func actionDetails(action CleanupAction) string {
+	if action.ServiceTrust == "" && action.ExecutablePath == "" {
+		return ""
+	}
+	details := make([]string, 0, 2)
+	if action.ServiceTrust != "" {
+		details = append(details, "trust="+action.ServiceTrust)
+	}
+	if action.ExecutablePath != "" {
+		details = append(details, "exe="+action.ExecutablePath)
+	}
+	return " (" + strings.Join(details, ", ") + ")"
 }
 
 func actionPhrase(actionType CleanupActionType) string {
