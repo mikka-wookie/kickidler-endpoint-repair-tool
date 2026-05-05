@@ -122,18 +122,21 @@ func TestParseDefenderExclusionJSONTreatsAdminPlaceholderAsUnavailable(t *testin
 	}
 }
 
-func TestStandardBinInstallDefenderCoverageAcceptsBinOrRootExclusion(t *testing.T) {
+func TestStandardBinInstallDefenderCoverageRequiresDerivedRootExclusion(t *testing.T) {
 	tests := []struct {
 		name      string
 		exclusion string
+		covered   bool
 	}{
 		{
 			name:      "bin exclusion",
 			exclusion: `C:\Program Files\TeleLinkSoft\bin`,
+			covered:   false,
 		},
 		{
 			name:      "root exclusion",
 			exclusion: `C:\Program Files\TeleLinkSoft`,
+			covered:   true,
 		},
 	}
 
@@ -142,13 +145,19 @@ func TestStandardBinInstallDefenderCoverageAcceptsBinOrRootExclusion(t *testing.
 			report := standardBinReport(true, []string{tt.exclusion})
 			enriched := EnrichDetectionReport(report)
 
-			if len(enriched.Defender.CoveredPaths) != 1 || enriched.Defender.CoveredPaths[0] != `C:\Program Files\TeleLinkSoft\bin` {
+			if tt.covered && (len(enriched.Defender.CoveredPaths) != 1 || enriched.Defender.CoveredPaths[0] != `C:\Program Files\TeleLinkSoft`) {
 				t.Fatalf("covered paths = %#v", enriched.Defender.CoveredPaths)
 			}
-			if len(enriched.Defender.MissingPaths) != 0 {
+			if !tt.covered && len(enriched.Defender.CoveredPaths) != 0 {
+				t.Fatalf("covered paths = %#v", enriched.Defender.CoveredPaths)
+			}
+			if tt.covered && len(enriched.Defender.MissingPaths) != 0 {
 				t.Fatalf("missing paths = %#v", enriched.Defender.MissingPaths)
 			}
-			if len(enriched.MissingDefenderPaths) != 0 {
+			if !tt.covered && (len(enriched.Defender.MissingPaths) != 1 || enriched.Defender.MissingPaths[0] != `C:\Program Files\TeleLinkSoft`) {
+				t.Fatalf("missing paths = %#v", enriched.Defender.MissingPaths)
+			}
+			if tt.covered && len(enriched.MissingDefenderPaths) != 0 {
 				t.Fatalf("top-level missing paths = %#v", enriched.MissingDefenderPaths)
 			}
 		})

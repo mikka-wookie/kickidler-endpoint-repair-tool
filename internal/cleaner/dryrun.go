@@ -24,7 +24,7 @@ func FormatDryRunSummary(report detector.DetectionReport, plan CleanupPlan, ctx 
 	} else {
 		b.WriteString("Planned actions:\n")
 		for _, action := range plan.Actions {
-			b.WriteString("- Would " + actionPhrase(action.Type) + ": " + action.Target + "\n")
+			b.WriteString("- Would " + actionPhrase(action.Type) + ": " + action.Target + actionDetails(action) + "\n")
 		}
 		b.WriteString("\n")
 	}
@@ -95,9 +95,23 @@ func dryRunActions(plan CleanupPlan) []string {
 	}
 	actions := make([]string, 0, len(plan.Actions))
 	for _, action := range plan.Actions {
-		actions = append(actions, "Would "+actionPhrase(action.Type)+": "+action.Target)
+		actions = append(actions, "Would "+actionPhrase(action.Type)+": "+action.Target+actionDetails(action))
 	}
 	return actions
+}
+
+func actionDetails(action CleanupAction) string {
+	if action.ServiceTrust == "" && action.ExecutablePath == "" {
+		return ""
+	}
+	details := make([]string, 0, 2)
+	if action.ServiceTrust != "" {
+		details = append(details, "trust="+action.ServiceTrust)
+	}
+	if action.ExecutablePath != "" {
+		details = append(details, "exe="+action.ExecutablePath)
+	}
+	return " (" + strings.Join(details, ", ") + ")"
 }
 
 func actionPhrase(actionType CleanupActionType) string {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -17,6 +18,7 @@ import (
 	"kigrepair/internal/diagnostics"
 	"kigrepair/internal/installer"
 	"kigrepair/internal/logging"
+	"kigrepair/internal/preflight"
 	"kigrepair/internal/repair"
 	"kigrepair/internal/reports"
 	"kigrepair/internal/verifier"
@@ -90,21 +92,6 @@ func repairCommand(opts *globalOptions) *cobra.Command {
 	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
 	cmd.Flags().BoolVar(&yes, "yes", false, "confirm repair without prompting")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview repair workflow without modifying the system")
-	return cmd
-}
-
-func preflightCommand(opts *globalOptions) *cobra.Command {
-	var invite string
-	var installerPath string
-	cmd := &cobra.Command{
-		Use:   "preflight",
-		Short: "Run read-only repair preflight checks",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowWithAdmin(cmd, opts, "preflight", false, repair.PreflightWorkflow{Invite: invite, Installer: installerPath})
-		},
-	}
-	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
-	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
 	return cmd
 }
 
@@ -189,6 +176,24 @@ func verifyCommand(opts *globalOptions) *cobra.Command {
 			return runWorkflowWithAdmin(cmd, opts, "verify", false, verifier.VerifyWorkflow{})
 		},
 	}
+}
+
+func preflightCommand(opts *globalOptions) *cobra.Command {
+	var invite string
+	var installerPath string
+	cmd := &cobra.Command{
+		Use:   "preflight",
+		Short: "Checks whether this machine is ready for Grabber repair without modifying the system.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowWithAdmin(cmd, opts, "preflight", false, preflight.Workflow{
+				InstallerPath: installerPath,
+				HasInvite:     strings.TrimSpace(invite) != "",
+			})
+		},
+	}
+	cmd.Flags().StringVar(&installerPath, "installer", "", "path to Grabber installer")
+	cmd.Flags().StringVar(&invite, "invite", "", "Kickidler invite string")
+	return cmd
 }
 
 func workflowCommand(use string, short string, opts *globalOptions, workflow app.Workflow) *cobra.Command {
@@ -303,7 +308,8 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	}
 	ctx.Reporter = reporter
 
-	logger, err := logging.New(reports.LogPath(ctx.OutputDir), ctx.Quiet || ctx.JSONOutput || workflow.Name() == "verify")
+	suppressConsoleLog := ctx.Quiet || ctx.JSONOutput || workflow.Name() == "verify" || workflow.Name() == "preflight"
+	logger, err := logging.New(reports.LogPath(ctx.OutputDir), suppressConsoleLog)
 	if err != nil {
 		return err
 	}

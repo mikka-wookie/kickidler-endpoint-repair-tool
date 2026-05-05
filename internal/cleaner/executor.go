@@ -1,6 +1,7 @@
 package cleaner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
 	"kigrepair/internal/safety"
+	svc "kigrepair/internal/services"
 )
 
 type CommandResult struct {
@@ -93,50 +95,23 @@ func (e Executor) ExecuteAction(action CleanupAction) app.OperationResult {
 }
 
 func (e Executor) stopService(action CleanupAction) app.OperationResult {
-	// MVP implementation: uses sc.exe. Keep this isolated so it can later be
-	// replaced with native Windows service APIs.
-	if !serviceExists(e.RunCommand, action.Target) {
-		return operation(action.Type, action.Target, app.OperationStatusSkipped, "Service does not exist", "")
-	}
-	state := serviceState(e.RunCommand, action.Target)
-	if strings.EqualFold(state, "stopped") {
-		return operation(action.Type, action.Target, app.OperationStatusSkipped, "Service is already stopped", "")
-	}
 	if e.Logger != nil {
 		e.Logger.Info("executing command: sc.exe stop %s", action.Target)
 	}
 	started := time.Now()
-	result := e.RunCommand("sc.exe", "stop", action.Target)
-	e.logCommandResult("sc.exe", result, time.Since(started))
-	if result.ExitCode != 0 && !strings.Contains(result.Output, "1062") {
-		return operation(action.Type, action.Target, app.OperationStatusFailed, "Service stop failed", resultError(result))
-	}
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if strings.EqualFold(serviceState(e.RunCommand, action.Target), "stopped") {
-			return operation(action.Type, action.Target, app.OperationStatusSuccess, "Service stopped", "")
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return operation(action.Type, action.Target, app.OperationStatusFailed, "Timed out waiting for service to stop", "")
+	result := svc.StopService(context.Background(), action.Target, svc.StopOptions{Runner: serviceRunner(e.RunCommand)})
+	e.logServiceAction(result, time.Since(started))
+	return serviceOperation(action.Type, action.Target, result)
 }
 
 func (e Executor) deleteService(action CleanupAction) app.OperationResult {
-	// MVP implementation: uses sc.exe. Keep this isolated so it can later be
-	// replaced with native Windows service APIs.
-	if !serviceExists(e.RunCommand, action.Target) {
-		return operation(action.Type, action.Target, app.OperationStatusSkipped, "Service does not exist", "")
-	}
 	if e.Logger != nil {
 		e.Logger.Info("executing command: sc.exe delete %s", action.Target)
 	}
 	started := time.Now()
-	result := e.RunCommand("sc.exe", "delete", action.Target)
-	e.logCommandResult("sc.exe", result, time.Since(started))
-	if result.ExitCode != 0 {
-		return operation(action.Type, action.Target, app.OperationStatusFailed, "Service deletion failed", resultError(result))
-	}
-	return operation(action.Type, action.Target, app.OperationStatusSuccess, "Service deleted", "")
+	result := svc.DeleteService(context.Background(), action.Target, svc.DeleteOptions{Runner: serviceRunner(e.RunCommand), AllowStop: false})
+	e.logServiceAction(result, time.Since(started))
+	return serviceOperation(action.Type, action.Target, result)
 }
 
 func (e Executor) killProcess(action CleanupAction) app.OperationResult {
@@ -263,6 +238,23 @@ func (e Executor) logCommandResult(name string, result CommandResult, duration t
 	}
 }
 
+func (e Executor) logServiceAction(result svc.ServiceActionResult, duration time.Duration) {
+	if e.Logger == nil {
+		return
+	}
+	e.Logger.Info("service %s %s status: %s", result.ServiceName, result.Action, result.Status)
+	e.Logger.Info("service %s %s duration: %s", result.ServiceName, result.Action, duration.Round(time.Millisecond))
+	if result.BeforeState != "" || result.AfterState != "" {
+		e.Logger.Info("service %s state transition: %s -> %s", result.ServiceName, result.BeforeState, result.AfterState)
+	}
+	for _, warning := range result.Warnings {
+		e.Logger.Warn("service %s warning: %s", result.ServiceName, warning)
+	}
+	for _, errText := range result.Errors {
+		e.Logger.Warn("service %s error: %s", result.ServiceName, errText)
+	}
+}
+
 func shortCommandOutput(output string) string {
 	output = strings.Join(strings.Fields(output), " ")
 	if len(output) > 500 {
@@ -279,6 +271,25 @@ func operation(step CleanupActionType, target string, status app.OperationStatus
 		Message:   message,
 		Error:     errText,
 		Timestamp: time.Now(),
+	}
+}
+
+func serviceOperation(step CleanupActionType, target string, result svc.ServiceActionResult) app.OperationResult {
+	errText := strings.Join(result.Errors, "; ")
+	message := result.Message
+	if len(result.Warnings) > 0 {
+		if message != "" {
+			message += " "
+		}
+		message += "Warnings: " + strings.Join(result.Warnings, "; ")
+	}
+	return operation(step, target, app.OperationStatus(result.Status), message, errText)
+}
+
+func serviceRunner(run CommandRunner) svc.CommandRunner {
+	return func(name string, args ...string) svc.CommandResult {
+		result := run(name, args...)
+		return svc.CommandResult{ExitCode: result.ExitCode, Output: result.Output, Err: result.Err}
 	}
 }
 
@@ -303,24 +314,6 @@ func resultError(result CommandResult) string {
 		return fmt.Sprintf("exit code %d: %s", result.ExitCode, result.Err)
 	}
 	return fmt.Sprintf("exit code %d", result.ExitCode)
-}
-
-func serviceExists(run CommandRunner, name string) bool {
-	// MVP implementation: uses sc.exe query. Keep this isolated so it can later
-	// be replaced with native Windows service APIs.
-	result := run("sc.exe", "query", name)
-	return result.ExitCode == 0
-}
-
-func serviceState(run CommandRunner, name string) string {
-	// MVP implementation: uses sc.exe query. Keep this isolated so it can later
-	// be replaced with native Windows service APIs.
-	result := run("sc.exe", "query", name)
-	re := regexp.MustCompile(`(?m)^\s*STATE\s*:\s*\d+\s+([A-Z_]+)`)
-	if match := re.FindStringSubmatch(result.Output); len(match) == 2 {
-		return strings.ToLower(match[1])
-	}
-	return ""
 }
 
 func currentProcess(run CommandRunner, pid int) (*detector.ProcessState, error) {
