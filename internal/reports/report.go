@@ -1,6 +1,7 @@
 package reports
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -45,5 +46,12 @@ func ensureExt(name string, ext string) string {
 }
 
 func marshalJSON(v any) ([]byte, error) {
-	return json.MarshalIndent(v, "", "  ")
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(v); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
 }

@@ -10,6 +10,7 @@ import (
 
 	"kigrepair/internal/app"
 	"kigrepair/internal/checks"
+	"kigrepair/internal/classifier"
 	"kigrepair/internal/cleaner"
 	"kigrepair/internal/defender"
 	"kigrepair/internal/detector"
@@ -118,6 +119,38 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 		return w.finish(ctx, result, &initial)
 	}
 
+	var resolution installer.InstallerResolution
+	var installerPath string
+	if decision.InstallNeeded {
+		resolved, validation, err := w.resolveAndValidateInstaller(ctx)
+		resolution = resolved
+		result.InstallerResolution = &resolution
+		result.InstallerValidation = validation
+		if validation != nil {
+			if err := ctx.Reporter.WriteJSON("installer-validation", validation); err != nil {
+				return err
+			}
+			addInstallerValidationOperation(ctx, validation.Path, *validation)
+			result.Warnings = append(result.Warnings, validation.Warnings...)
+		}
+		if err != nil {
+			ctx.ExitCode = ExitInvalidInput
+			result.Errors = append(result.Errors, err.Error())
+			addOperation(ctx, "resolve_installer", "installer", app.OperationStatusFailed, "Installer could not be resolved", err.Error())
+			return w.finish(ctx, result, &initial)
+		}
+		if validation != nil && !validation.IsUsable() {
+			message := "Installer cannot be used: " + validation.ErrorSummary()
+			ctx.ExitCode = ExitInvalidInput
+			result.Errors = append(result.Errors, message)
+			addOperation(ctx, "validate_installer", validation.Path, app.OperationStatusFailed, message, strings.Join(validation.Errors, "; "))
+			return w.finish(ctx, result, &initial)
+		}
+		installerPath = resolution.SelectedPath
+		result.InstallerPath = installerPath
+		addOperation(ctx, "resolve_installer", installerPath, app.OperationStatusSuccess, "Installer resolved from "+string(resolution.SelectedSource), "")
+	}
+
 	if err := w.confirm(ctx, initial, decision); err != nil {
 		ctx.ExitCode = ExitConfirmationRequired
 		message := err.Error()
@@ -171,26 +204,10 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 
 	var msi installer.MSIResult
 	if decision.InstallNeeded {
-		resolveInstaller := installer.ResolveInstaller
-		if w.InstallerResolver != nil {
-			resolveInstaller = w.InstallerResolver
-		}
-		resolution, err := resolveInstaller(w.Installer)
-		result.InstallerResolution = &resolution
-		if err != nil {
-			ctx.ExitCode = ExitInvalidInput
-			result.Errors = append(result.Errors, err.Error())
-			addOperation(ctx, "resolve_installer", "installer", app.OperationStatusFailed, "Installer could not be resolved", err.Error())
-			return w.finish(ctx, result, &initial)
-		}
-		installer.LogInstallerResolution(ctx.Logger, resolution)
-		installerPath := resolution.SelectedPath
-		result.InstallerPath = installerPath
-		addOperation(ctx, "resolve_installer", installerPath, app.OperationStatusSuccess, "Installer resolved from "+string(resolution.SelectedSource), "")
 		result.InstallExecuted = true
 		msi = w.runInstall(ctx, installerPath, invite)
 		result.RebootRequired = msi.RebootRequired
-		if err := ctx.Reporter.WriteJSON("install-result", installResult(startedAt, string(ctx.Mode), installerPath, result.InviteProvided, msi, ctx.OutputDir, resolution)); err != nil {
+		if err := ctx.Reporter.WriteJSON("install-result", installResult(startedAt, string(ctx.Mode), installerPath, result.InviteProvided, msi, ctx.OutputDir, resolution, result.InstallerValidation)); err != nil {
 			return err
 		}
 		if !msi.Success {
@@ -232,6 +249,8 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 		AllowStoppedServiceWarning: true,
 	})
 	result.Verification = &verification
+	classification := classifier.Classify(classifier.ClassificationInput{Detection: &final, Verification: &verification})
+	result.Classification = &classification
 	result.Warnings = append(result.Warnings, verification.Warnings...)
 	result.Errors = append(result.Errors, verification.Errors...)
 	for _, operation := range verifier.Operations(verification) {
@@ -242,6 +261,23 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 
 	ctx.ExitCode = finalExitCode(msi, verification, ctx.Results, defenderRan)
 	return w.finish(ctx, result, &final)
+}
+
+func (w RepairWorkflow) resolveAndValidateInstaller(ctx *app.AppContext) (installer.InstallerResolution, *installer.ValidationResult, error) {
+	resolveInstaller := installer.ResolveInstaller
+	if w.InstallerResolver != nil {
+		resolveInstaller = w.InstallerResolver
+	}
+	resolution, err := resolveInstaller(w.Installer)
+	installer.LogInstallerResolution(ctx.Logger, resolution)
+	validation := installer.ValidationFromResolution(resolution)
+	if validation != nil {
+		ctx.Logger.Info("installer validation status: %s", validation.Status)
+	}
+	if err != nil {
+		return resolution, validation, err
+	}
+	return resolution, validation, nil
 }
 
 func (w RepairWorkflow) validateInputs(ctx *app.AppContext, result *RepairResult) (string, bool) {
@@ -283,16 +319,22 @@ func (w RepairWorkflow) confirm(ctx *app.AppContext, initial detector.DetectionR
 func (w RepairWorkflow) finish(ctx *app.AppContext, result RepairResult, final *detector.DetectionReport) error {
 	result.FinishedAt = time.Now()
 	result.ExitCode = ctx.ExitCode
+	var recommendationClassification *recommendations.ClassificationResult
+	if result.Classification != nil {
+		converted := recommendations.FromClassifier(*result.Classification)
+		recommendationClassification = &converted
+	}
 	recommendation := recommendations.Plan(recommendations.RecommendationInput{
-		Detection:     final,
-		Verification:  recommendationVerification(result.Verification),
-		InstallerPath: result.InstallerPath,
-		HasInstaller:  strings.TrimSpace(result.InstallerPath) != "" || result.InstallerResolution != nil,
-		HasInvite:     result.InviteProvided,
-		IsAdmin:       final == nil || final.IsAdmin,
-		IsInteractive: !ctx.NonInteractive && !ctx.Quiet,
-		OutputDir:     ctx.OutputDir,
-		RepairFailed:  repairHardFailed(ctx.ExitCode),
+		Detection:      final,
+		Verification:   recommendationVerification(result.Verification),
+		Classification: recommendationClassification,
+		InstallerPath:  result.InstallerPath,
+		HasInstaller:   strings.TrimSpace(result.InstallerPath) != "" || result.InstallerResolution != nil,
+		HasInvite:      result.InviteProvided,
+		IsAdmin:        final == nil || final.IsAdmin,
+		IsInteractive:  !ctx.NonInteractive && !ctx.Quiet,
+		OutputDir:      ctx.OutputDir,
+		RepairFailed:   repairHardFailed(ctx.ExitCode),
 	})
 	result.Recommendation = &recommendation
 	ctx.JSONValue = result
@@ -321,6 +363,16 @@ func (w RepairWorkflow) finish(ctx *app.AppContext, result RepairResult, final *
 			return err
 		}
 	}
+	if result.Classification != nil {
+		if err := ctx.Reporter.WriteJSON("classification-result", result.Classification); err != nil {
+			return err
+		}
+	}
+	if result.InstallerValidation != nil {
+		if err := ctx.Reporter.WriteJSON("installer-validation", result.InstallerValidation); err != nil {
+			return err
+		}
+	}
 	if err := ctx.Reporter.WriteOperations(ctx.Results); err != nil {
 		return err
 	}
@@ -332,6 +384,17 @@ func (w RepairWorkflow) finish(ctx *app.AppContext, result RepairResult, final *
 		fmt.Print(summary)
 	}
 	return nil
+}
+
+func addInstallerValidationOperation(ctx *app.AppContext, target string, validation installer.ValidationResult) {
+	status := app.OperationStatusSuccess
+	if validation.Status == installer.ValidationStatusValidWithWarnings {
+		status = app.OperationStatusWarning
+	}
+	if !validation.IsUsable() {
+		status = app.OperationStatusFailed
+	}
+	addOperation(ctx, "installer_validation", target, status, "Installer validation: "+validation.Status, strings.Join(validation.Errors, "; "))
 }
 
 func repairHardFailed(exitCode int) bool {

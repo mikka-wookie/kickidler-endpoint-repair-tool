@@ -10,11 +10,23 @@ import (
 
 func TestBuildPlanPlansServiceActions(t *testing.T) {
 	plan := BuildPlan(detector.DetectionReport{
-		Services: []detector.ServiceState{{Name: "ngs", Exists: true}},
+		Services: []detector.ServiceState{{Name: "ngs", Exists: true, Status: "running", TrustLevel: "trusted", NormalizedExecutablePath: `C:\Program Files\TeleLinkSoft\bin\grabber2.exe`}},
 	}, testPlanOptions(nil, nil))
 
 	assertAction(t, plan, CleanupActionStopService, "ngs")
 	assertAction(t, plan, CleanupActionDeleteService, "ngs")
+}
+
+func TestBuildPlanSkipsPathMismatchServiceActions(t *testing.T) {
+	plan := BuildPlan(detector.DetectionReport{
+		Services: []detector.ServiceState{{Name: "ngs", Exists: true, TrustLevel: "path_mismatch", NormalizedExecutablePath: `C:\Unexpected\service.exe`}},
+	}, testPlanOptions(nil, nil))
+
+	assertNoAction(t, plan, CleanupActionStopService, "ngs")
+	assertNoAction(t, plan, CleanupActionDeleteService, "ngs")
+	if len(plan.Warnings) != 1 {
+		t.Fatalf("expected warning for skipped service, got %#v", plan.Warnings)
+	}
 }
 
 func TestBuildPlanPlansProcessAction(t *testing.T) {

@@ -31,6 +31,8 @@ type CleanupAction struct {
 	PID            int               `json:"pid,omitempty"`
 	ProcessName    string            `json:"process_name,omitempty"`
 	ExecutablePath string            `json:"executable_path,omitempty"`
+	ServiceTrust   string            `json:"service_trust,omitempty"`
+	ServiceState   string            `json:"service_state,omitempty"`
 	Error          string            `json:"error,omitempty"`
 }
 
@@ -86,20 +88,30 @@ func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
 		if !service.Exists {
 			continue
 		}
+		if service.TrustLevel != "trusted" {
+			plan.Warnings = append(plan.Warnings, fmt.Sprintf("Service %s will not be modified automatically because trust level is %s", service.Name, valueOrUnknown(service.TrustLevel)))
+			continue
+		}
 		plan.Actions = append(plan.Actions,
 			CleanupAction{
-				Type:     CleanupActionStopService,
-				Target:   service.Name,
-				Reason:   "Known Grabber service detected",
-				Safe:     true,
-				WouldRun: opts.DryRun,
+				Type:           CleanupActionStopService,
+				Target:         service.Name,
+				Reason:         "Trusted Grabber service detected",
+				Safe:           true,
+				WouldRun:       opts.DryRun,
+				ExecutablePath: service.NormalizedExecutablePath,
+				ServiceTrust:   service.TrustLevel,
+				ServiceState:   service.Status,
 			},
 			CleanupAction{
-				Type:     CleanupActionDeleteService,
-				Target:   service.Name,
-				Reason:   "Known Grabber service detected",
-				Safe:     true,
-				WouldRun: opts.DryRun,
+				Type:           CleanupActionDeleteService,
+				Target:         service.Name,
+				Reason:         "Trusted Grabber service detected",
+				Safe:           true,
+				WouldRun:       opts.DryRun,
+				ExecutablePath: service.NormalizedExecutablePath,
+				ServiceTrust:   service.TrustLevel,
+				ServiceState:   service.Status,
 			},
 		)
 	}
@@ -154,6 +166,13 @@ func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
 	}
 
 	return plan
+}
+
+func valueOrUnknown(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "unknown"
+	}
+	return value
 }
 
 func pathExists(path string) (bool, error) {

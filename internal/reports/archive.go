@@ -173,6 +173,8 @@ type bundleSpec struct {
 
 func bundleSpecs() []bundleSpec {
 	reportNames := []string{
+		"repair-plan.json",
+		"preflight-result.json",
 		"initial-detection.json",
 		"final-detection.json",
 		"operations.json",
@@ -184,6 +186,8 @@ func bundleSpecs() []bundleSpec {
 		"preflight-result.json",
 		"classification-result.json",
 		"recommendation-result.json",
+		"classification-result.json",
+		"installer-validation.json",
 		"collect-result.json",
 	}
 	specs := []bundleSpec{{sourceRel: "summary.txt", archiveRel: "summary.txt"}}

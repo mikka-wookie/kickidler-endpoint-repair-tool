@@ -3,6 +3,7 @@ package diagnostics
 import (
 	"time"
 
+	"kigrepair/internal/classifier"
 	"kigrepair/internal/recommendations"
 )
 
@@ -22,6 +23,7 @@ type CollectReportResult struct {
 	Health           string                                `json:"health,omitempty"`
 	InstallMode      string                                `json:"install_mode,omitempty"`
 	InstallRoot      string                                `json:"install_root,omitempty"`
+	Classification   *classifier.ClassificationResult      `json:"classification,omitempty"`
 	Recommendation   *recommendations.RecommendationResult `json:"recommendation,omitempty"`
 	ExitCode         int                                   `json:"exit_code"`
 }

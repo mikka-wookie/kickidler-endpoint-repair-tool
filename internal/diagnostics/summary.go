@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"kigrepair/internal/classifier"
 	"kigrepair/internal/recommendations"
 	"kigrepair/internal/reports"
 )
@@ -16,6 +17,10 @@ func FormatCollectSummary(result CollectReportResult) string {
 	b.WriteString("Health: " + valueOrDash(result.Health) + "\n")
 	b.WriteString("Install mode: " + valueOrDash(result.InstallMode) + "\n")
 	b.WriteString("Install root: " + valueOrDash(result.InstallRoot) + "\n\n")
+	if result.Classification != nil {
+		b.WriteString(classifier.FormatSection(*result.Classification))
+		b.WriteString("\n")
+	}
 	b.WriteString("Collectors:\n")
 	for _, collector := range result.Collectors {
 		b.WriteString("- " + collector.Name + ": " + collector.Status + "\n")

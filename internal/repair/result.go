@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"kigrepair/internal/app"
+	"kigrepair/internal/classifier"
 	"kigrepair/internal/installer"
 	"kigrepair/internal/recommendations"
 	"kigrepair/internal/verifier"
@@ -31,6 +32,7 @@ type RepairResult struct {
 	InviteProvided      bool                                  `json:"invite_provided"`
 	InstallerPath       string                                `json:"installer_path"`
 	InstallerResolution *installer.InstallerResolution        `json:"installer_resolution,omitempty"`
+	InstallerValidation *installer.ValidationResult           `json:"installer_validation,omitempty"`
 	InitialHealth       string                                `json:"initial_health"`
 	InitialInstallMode  string                                `json:"initial_install_mode"`
 	InitialInstallRoot  string                                `json:"initial_install_root"`
@@ -42,6 +44,7 @@ type RepairResult struct {
 	FinalInstallMode    string                                `json:"final_install_mode"`
 	FinalInstallRoot    string                                `json:"final_install_root"`
 	Verification        *verifier.VerificationResult          `json:"verification_result,omitempty"`
+	Classification      *classifier.ClassificationResult      `json:"classification,omitempty"`
 	Recommendation      *recommendations.RecommendationResult `json:"recommendation,omitempty"`
 	RebootRequired      bool                                  `json:"reboot_required"`
 	Warnings            []string                              `json:"warnings"`

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"kigrepair/internal/app"
+	"kigrepair/internal/classifier"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/logging"
 	"kigrepair/internal/recommendations"
@@ -22,6 +23,7 @@ func (w CheckWorkflow) Run(ctx *app.AppContext) error {
 	ctx.Logger.Info("Starting detection-only check")
 	report := detector.Detect()
 	logDefenderDetection(ctx.Logger, report)
+	classification := classifier.Classify(classifier.ClassificationInput{Detection: &report})
 
 	status := app.OperationStatusSuccess
 	if report.Health != detector.GrabberHealthHealthy {
@@ -41,11 +43,16 @@ func (w CheckWorkflow) Run(ctx *app.AppContext) error {
 	}
 	ctx.Logger.Info("Wrote initial-detection.json")
 	recommendation := recommendations.Plan(recommendations.RecommendationInput{
-		Detection:     &report,
-		IsAdmin:       report.IsAdmin,
-		IsInteractive: !ctx.NonInteractive && !ctx.Quiet,
-		OutputDir:     ctx.OutputDir,
+		Detection:      &report,
+		Classification: ptr(recommendations.FromClassifier(classification)),
+		IsAdmin:        report.IsAdmin,
+		IsInteractive:  !ctx.NonInteractive && !ctx.Quiet,
+		OutputDir:      ctx.OutputDir,
 	})
+	if err := ctx.Reporter.WriteJSON("classification-result", classification); err != nil {
+		return err
+	}
+	ctx.Logger.Info("Wrote classification-result.json")
 	if err := ctx.Reporter.WriteJSON("recommendation-result", recommendation); err != nil {
 		return err
 	}
@@ -59,8 +66,9 @@ func (w CheckWorkflow) Run(ctx *app.AppContext) error {
 		Errors:         report.Issues,
 		Detection:      report,
 		Recommendation: recommendation,
+		Classification: classification,
 	}
-	if err := ctx.Reporter.WriteText("summary", FormatSummary(report, ctx, recommendation)); err != nil {
+	if err := ctx.Reporter.WriteText("summary", FormatSummary(report, classification, ctx, recommendation)); err != nil {
 		return err
 	}
 	ctx.Logger.Info("Wrote summary.txt")
@@ -69,7 +77,7 @@ func (w CheckWorkflow) Run(ctx *app.AppContext) error {
 	}
 	ctx.Logger.Info("Wrote operations.json")
 	if !ctx.Quiet && !ctx.JSONOutput {
-		fmt.Print(FormatConsoleSummary(report, ctx, recommendation))
+		fmt.Print(FormatConsoleSummary(report, classification, ctx, recommendation))
 	}
 	return nil
 }
@@ -82,6 +90,7 @@ type CheckResult struct {
 	Errors         []string                             `json:"errors"`
 	Detection      detector.DetectionReport             `json:"detection"`
 	Recommendation recommendations.RecommendationResult `json:"recommendation"`
+	Classification classifier.ClassificationResult      `json:"classification"`
 }
 
 func exitCodeForHealth(health detector.GrabberHealthStatus) int {
@@ -99,11 +108,11 @@ func exitCodeForHealth(health detector.GrabberHealthStatus) int {
 	}
 }
 
-func FormatConsoleSummary(report detector.DetectionReport, ctx *app.AppContext, recommendation recommendations.RecommendationResult) string {
-	return FormatSummary(report, ctx, recommendation)
+func FormatConsoleSummary(report detector.DetectionReport, classification classifier.ClassificationResult, ctx *app.AppContext, recommendation recommendations.RecommendationResult) string {
+	return FormatSummary(report, classification, ctx, recommendation)
 }
 
-func FormatSummary(report detector.DetectionReport, ctx *app.AppContext, recommendation recommendations.RecommendationResult) string {
+func FormatSummary(report detector.DetectionReport, classification classifier.ClassificationResult, ctx *app.AppContext, recommendation recommendations.RecommendationResult) string {
 	var b strings.Builder
 	b.WriteString("Kigrepair Check Summary\n\n")
 	b.WriteString("Health: " + string(report.Health) + "\n")
@@ -116,6 +125,9 @@ func FormatSummary(report detector.DetectionReport, ctx *app.AppContext, recomme
 	if coveredBy := defenderCoveredBy(report); coveredBy != "" {
 		b.WriteString("Covered by: " + coveredBy + "\n\n")
 	}
+	writeServiceDetails(&b, report)
+	b.WriteString(classifier.FormatSection(classification))
+	b.WriteString("\n")
 	if len(report.Issues) > 0 {
 		b.WriteString("Issues:\n")
 		for _, issue := range report.Issues {
@@ -150,6 +162,42 @@ func FormatSummary(report detector.DetectionReport, ctx *app.AppContext, recomme
 		Errors:         report.Issues,
 		Actions:        []string{"Detection completed with health: " + string(report.Health)},
 	}, b.String()+recommendations.FormatSection(recommendation))
+}
+
+func writeServiceDetails(b *strings.Builder, report detector.DetectionReport) {
+	if len(report.Services) == 0 {
+		return
+	}
+	b.WriteString("Services\n")
+	b.WriteString("--------\n")
+	for _, service := range report.Services {
+		b.WriteString(service.Name + ":\n")
+		b.WriteString("  Exists: " + yesNo(service.Exists) + "\n")
+		if !service.Exists {
+			continue
+		}
+		b.WriteString("  State: " + valueOrDash(service.Status) + "\n")
+		b.WriteString("  ImagePath: " + valueOrDash(service.ImagePath) + "\n")
+		b.WriteString("  Executable: " + valueOrDash(service.NormalizedExecutablePath) + "\n")
+		b.WriteString("  Trust: " + valueOrDash(service.TrustLevel) + "\n")
+		b.WriteString("  Install mode: " + valueOrDash(service.InstallMode) + "\n")
+		b.WriteString("  Install root: " + valueOrDash(service.InstallRoot) + "\n")
+		for _, warning := range service.Warnings {
+			b.WriteString("  Warning: " + warning + "\n")
+		}
+	}
+	b.WriteString("\n")
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
+}
+
+func ptr[T any](value T) *T {
+	return &value
 }
 
 func valueOrDash(value string) string {

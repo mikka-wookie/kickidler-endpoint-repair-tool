@@ -24,13 +24,14 @@ const (
 )
 
 type InstallerCandidate struct {
-	Path          string          `json:"path"`
-	Name          string          `json:"name"`
-	Source        InstallerSource `json:"source"`
-	Exists        bool            `json:"exists"`
-	PreferredRank int             `json:"preferred_rank"`
-	Architecture  string          `json:"architecture"`
-	PackageType   string          `json:"package_type"`
+	Path          string           `json:"path"`
+	Name          string           `json:"name"`
+	Source        InstallerSource  `json:"source"`
+	Exists        bool             `json:"exists"`
+	PreferredRank int              `json:"preferred_rank"`
+	Architecture  string           `json:"architecture"`
+	PackageType   string           `json:"package_type"`
+	Validation    ValidationResult `json:"validation"`
 }
 
 type InstallerResolution struct {
@@ -79,16 +80,30 @@ func ResolveInstallerWithSearchPaths(explicitPath string, searchPaths []Installe
 	}
 
 	if strings.TrimSpace(explicitPath) != "" {
-		path, err := ValidateInstallerPath(explicitPath)
-		if err != nil {
-			resolution.Error = err.Error()
-			return resolution, err
-		}
+		validation := ValidateMSI(explicitPath, defaultValidationOptions(true, osPreferredInstallerArch(resolution.OSArchitecture)))
+		path := validation.Path
 		name := filepath.Base(path)
 		packageType, arch, ok := ParseInstallerName(name)
 		if !ok {
 			packageType = "custom"
 			arch = "unknown"
+		}
+		if !validation.IsUsable() {
+			err := fmt.Errorf("%w: %s", ErrInvalidInstaller, validation.ErrorSummary())
+			resolution.SelectedPath = path
+			resolution.SelectedSource = InstallerSourceExplicit
+			resolution.Candidates = []InstallerCandidate{{
+				Path:          path,
+				Name:          name,
+				Source:        InstallerSourceExplicit,
+				Exists:        validation.Exists,
+				PreferredRank: preferredRank(name, PreferredInstallerNames(resolution.OSArchitecture)),
+				Architecture:  arch,
+				PackageType:   packageType,
+				Validation:    validation,
+			}}
+			resolution.Error = err.Error()
+			return resolution, err
 		}
 		resolution.SelectedPath = path
 		resolution.SelectedSource = InstallerSourceExplicit
@@ -100,6 +115,7 @@ func ResolveInstallerWithSearchPaths(explicitPath string, searchPaths []Installe
 			PreferredRank: preferredRank(name, PreferredInstallerNames(resolution.OSArchitecture)),
 			Architecture:  arch,
 			PackageType:   packageType,
+			Validation:    validation,
 		}}
 		return resolution, nil
 	}
@@ -124,6 +140,7 @@ func ResolveInstallerWithSearchPaths(explicitPath string, searchPaths []Installe
 			if err == nil {
 				path = detector.NormalizeWindowsPath(abs)
 			}
+			validation := ValidateMSI(path, defaultValidationOptions(false, osPreferredInstallerArch(resolution.OSArchitecture)))
 			resolution.Candidates = append(resolution.Candidates, InstallerCandidate{
 				Path:          path,
 				Name:          name,
@@ -132,6 +149,7 @@ func ResolveInstallerWithSearchPaths(explicitPath string, searchPaths []Installe
 				PreferredRank: preferredRank(name, preferredNames),
 				Architecture:  arch,
 				PackageType:   packageType,
+				Validation:    validation,
 			})
 		}
 	}
@@ -145,13 +163,23 @@ func ResolveInstallerWithSearchPaths(explicitPath string, searchPaths []Installe
 		return sourceRank(left.Source) < sourceRank(right.Source)
 	})
 
-	if len(resolution.Candidates) == 0 {
+	usableCandidates := make([]InstallerCandidate, 0, len(resolution.Candidates))
+	for _, candidate := range resolution.Candidates {
+		if candidate.Validation.IsUsable() {
+			usableCandidates = append(usableCandidates, candidate)
+		}
+	}
+
+	if len(usableCandidates) == 0 {
 		err := fmt.Errorf("%w in supported search paths", ErrInstallerNotFound)
+		if len(resolution.Candidates) > 0 {
+			err = fmt.Errorf("%w: supported MSI candidates were found but none passed validation", ErrInstallerNotFound)
+		}
 		resolution.Error = err.Error()
 		return resolution, err
 	}
 
-	selected := resolution.Candidates[0]
+	selected := usableCandidates[0]
 	resolution.SelectedPath = selected.Path
 	resolution.SelectedSource = selected.Source
 	return resolution, nil
@@ -231,4 +259,19 @@ func sourceRank(source InstallerSource) int {
 	default:
 		return 99
 	}
+}
+
+func ValidationFromResolution(resolution InstallerResolution) *ValidationResult {
+	selectedPath := strings.TrimSpace(resolution.SelectedPath)
+	for _, candidate := range resolution.Candidates {
+		if strings.EqualFold(candidate.Path, selectedPath) && candidate.Validation.Status != "" {
+			validation := candidate.Validation
+			return &validation
+		}
+	}
+	if selectedPath == "" {
+		return nil
+	}
+	validation := ValidateMSI(selectedPath, defaultValidationOptions(resolution.SelectedSource == InstallerSourceExplicit, osPreferredInstallerArch(resolution.OSArchitecture)))
+	return &validation
 }

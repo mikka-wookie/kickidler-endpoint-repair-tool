@@ -5,7 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"kigrepair/internal/classifier"
 	"kigrepair/internal/detector"
+	"kigrepair/internal/installer"
 	"kigrepair/internal/recommendations"
 	"kigrepair/internal/reports"
 	"kigrepair/internal/verifier"
@@ -44,8 +46,13 @@ func FormatSummary(result RepairResult, final *detector.DetectionReport) string 
 			b.WriteString("Installer source: " + string(result.InstallerResolution.SelectedSource) + "\n")
 		}
 		b.WriteString("\n")
+	} else if result.InstallerValidation != nil {
+		b.WriteString("Selected installer: " + valueOrDash(result.InstallerPath) + "\n\n")
 	} else {
 		b.WriteString("Installer: not required\n\n")
+	}
+	if result.InstallerValidation != nil {
+		b.WriteString(installer.FormatValidationSection(*result.InstallerValidation))
 	}
 	if !result.CleanupExecuted && !result.InstallExecuted && result.InitialHealth == string(detector.GrabberHealthHealthy) {
 		b.WriteString("No reinstall required.\n")
@@ -84,6 +91,11 @@ func FormatSummary(result RepairResult, final *detector.DetectionReport) string 
 	}
 	if result.Verification == nil && result.Recommendation != nil {
 		b.WriteString(recommendations.FormatSection(*result.Recommendation))
+		b.WriteString("\n")
+	}
+	if result.Classification != nil {
+		b.WriteString(classifier.FormatSection(*result.Classification))
+		b.WriteString("\n")
 	}
 	if len(result.Warnings) > 0 {
 		b.WriteString("Warnings:\n")

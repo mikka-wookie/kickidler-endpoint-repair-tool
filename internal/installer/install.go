@@ -54,12 +54,30 @@ func (w InstallWorkflow) Run(ctx *app.AppContext) error {
 	resolution, err := resolveInstaller(w.Installer)
 	result.Resolution = resolution
 	if err != nil {
+		if validation := ValidationFromResolution(resolution); validation != nil {
+			result.Validation = validation
+			_ = ctx.Reporter.WriteJSON("installer-validation", validation)
+		}
 		return w.finishEarly(ctx, result, ExitInstallInvalidInstaller, "install.resolve_installer", "installer", "Installer could not be resolved", err)
 	}
 	LogInstallerResolution(ctx.Logger, resolution)
 	installerPath := resolution.SelectedPath
 	result.InstallerPath = installerPath
 	ctx.Logger.Info("installer path: %s", installerPath)
+	validation := ValidationFromResolution(resolution)
+	result.Validation = validation
+	if validation != nil {
+		ctx.Logger.Info("installer validation status: %s", validation.Status)
+		if err := ctx.Reporter.WriteJSON("installer-validation", validation); err != nil {
+			return err
+		}
+		if !validation.IsUsable() {
+			message := "Installer cannot be used: " + validation.ErrorSummary()
+			return w.finishEarly(ctx, result, ExitInstallInvalidInstaller, "install.validate_installer", installerPath, message, errors.New(message))
+		}
+		addValidationOperation(ctx, installerPath, *validation)
+		result.Warnings = append(result.Warnings, validation.Warnings...)
+	}
 
 	isAdmin := checks.IsAdmin
 	if w.IsAdmin != nil {
@@ -233,6 +251,11 @@ func (w InstallWorkflow) finishEarly(ctx *app.AppContext, result InstallResult, 
 	if writeErr := ctx.Reporter.WriteJSON("install-result", result); writeErr != nil {
 		return writeErr
 	}
+	if result.Validation != nil {
+		if writeErr := ctx.Reporter.WriteJSON("installer-validation", result.Validation); writeErr != nil {
+			return writeErr
+		}
+	}
 	if writeErr := ctx.Reporter.WriteOperations(ctx.Results); writeErr != nil {
 		return writeErr
 	}
@@ -244,6 +267,26 @@ func (w InstallWorkflow) finishEarly(ctx *app.AppContext, result InstallResult, 
 		fmt.Print(summary)
 	}
 	return nil
+}
+
+func addValidationOperation(ctx *app.AppContext, target string, validation ValidationResult) {
+	status := app.OperationStatusSuccess
+	if validation.Status == ValidationStatusValidWithWarnings {
+		status = app.OperationStatusWarning
+	}
+	if validation.Status == ValidationStatusInvalid || validation.Status == ValidationStatusUnknown {
+		status = app.OperationStatusFailed
+	}
+	operation := app.OperationResult{
+		Step:      "installer_validation",
+		Target:    target,
+		Status:    status,
+		Message:   "Installer validation: " + validation.Status,
+		Error:     strings.Join(validation.Errors, "; "),
+		Timestamp: time.Now(),
+	}
+	ctx.AddResult(operation)
+	logging.LogOperation(ctx.Logger, operation)
 }
 
 func detectionOperationStatus(report detector.DetectionReport) app.OperationStatus {

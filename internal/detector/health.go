@@ -52,6 +52,11 @@ func CalculateHealth(report DetectionReport) (GrabberHealthStatus, []string, []s
 	if !report.Defender.Available {
 		issues = append(issues, "Defender exclusions could not be verified")
 	}
+	for _, service := range report.Services {
+		for _, warning := range service.Warnings {
+			issues = append(issues, "Service "+service.Name+": "+warning)
+		}
+	}
 
 	if anyServiceExists && report.PrimaryService == "" {
 		issues = append(issues, "Known service exists but install root could not be resolved")
