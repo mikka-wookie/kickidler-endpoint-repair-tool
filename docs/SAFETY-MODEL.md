@@ -95,6 +95,14 @@ Defender status reads configuration. Defender ensure changes exclusions and must
 
 MSI validation runs before destructive repair or install. Invalid, missing, unreadable, or unsupported installers should stop the workflow before mutation.
 
+## Failure-mode hardening
+
+External commands are expected to run through the shared command runner with a timeout, exit code, redacted stdout/stderr, and support-readable failure category. Runtime defaults include 30 seconds for PowerShell metadata/Defender queries, 10 seconds for service queries, 30 seconds for service stop, 10 seconds for process termination, 10 minutes for MSI install/uninstall, and 2 minutes for support bundle creation.
+
+Critical pre-mutation report files must be writable before mutation starts. If report directory creation fails, the command should exit `10` and make no system changes. If rollback snapshot creation or writing fails, repair, cleanup, install, and Defender ensure should stop before making changes.
+
+Panic recovery exists at the CLI command boundary. The user sees a minimal unexpected-error message and exit `10`; stack traces are printed only when `KIGREPAIR_DEBUG=1`.
+
 ## Rollback and audit
 
 Rollback/change snapshot information should be written before mutation where practical. `rollback-info.json`, `operations.json`, and `repair.log` are audit artifacts.

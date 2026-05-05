@@ -5,11 +5,11 @@ const (
 	ExitWarnings             = 1
 	ExitAdminRequired        = 2
 	ExitConfirmationRequired = 3
-	ExitInvalidInput         = 4
-	ExitCleanupFailed        = 5
-	ExitInstallFailed        = 6
+	ExitInvalidInput         = 7
+	ExitCleanupFailed        = 7
+	ExitInstallFailed        = 7
 	ExitVerificationFailed   = 7
-	ExitDefenderFailed       = 8
+	ExitDefenderFailed       = 7
 	ExitRebootRequired       = 9
 	ExitUnexpectedError      = 10
 )

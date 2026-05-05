@@ -54,5 +54,14 @@ func (c *AppContext) AddResult(result OperationResult) {
 	if result.Timestamp.IsZero() {
 		result.Timestamp = time.Now()
 	}
+	if result.StartedAt.IsZero() {
+		result.StartedAt = result.Timestamp
+	}
+	if result.FinishedAt.IsZero() {
+		result.FinishedAt = result.Timestamp
+	}
+	if result.DurationMS == 0 && !result.StartedAt.IsZero() && !result.FinishedAt.IsZero() {
+		result.DurationMS = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
+	}
 	c.Results = append(c.Results, result)
 }

@@ -254,6 +254,49 @@ Files to check: `preflight-result.json`, `repair-plan.json`, `cleanup-result.jso
 
 Escalation data: First failed operation from `operations.json`.
 
+## Command failed before making changes
+
+Symptom: A mutating command exits before cleanup, Defender changes, or MSI install begin.
+
+Likely cause: report directory creation failed, confirmation is missing, admin rights are missing, installer validation failed, invite is missing, or rollback snapshot could not be written.
+
+Commands:
+
+```powershell
+.\kigrepair.exe preflight --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
+.\kigrepair.exe repair --dry-run --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
+```
+
+Files to check: `summary.txt`, `operations.json`, `preflight-result.json`, `repair-plan.json`, `rollback-info.json`.
+
+Escalation data: Exit code, first failed operation, and report directory path.
+
+## Repair failed before MSI install
+
+Symptom: `repair-result.json` shows `install_executed=false`.
+
+Likely cause: cleanup failed, Defender ensure was required and failed, or rollback snapshot/report writing failed before mutation.
+
+Files to check: `repair-result.json`, `cleanup-result.json`, `defender-result.json`, `operations.json`, `repair.log`.
+
+Escalation data: Whether any cleanup actions executed and whether `rollback-info.json` exists.
+
+## MSI install timed out
+
+Symptom: `msi_install` operation or `install-result.json` reports `failed_timeout` or exit code `-1`.
+
+Likely cause: Windows Installer is blocked, another install is running, installer UI is waiting unexpectedly, or endpoint policy interfered.
+
+Commands:
+
+```powershell
+.\kigrepair.exe collect-report
+```
+
+Files to check: `install-result.json`, `repair-result.json`, `msi-install.log`, `operations.json`.
+
+Escalation data: MSI log path, timeout status, Windows Installer service state.
+
 ## Repair succeeds but verification fails
 
 Symptom: Repair completed but exit code is `7` or `verification_failed`.
@@ -286,6 +329,31 @@ Commands:
 Files to check: `collect-result.json`, `repair.log`.
 
 Escalation data: Attach bundle if created and note skipped collectors.
+
+## Report bundle created with warnings
+
+Symptom: `collect-report` exits `1` and bundle exists.
+
+Likely cause: optional event logs, history files, MSI logs, or report files were missing, locked, inaccessible, or skipped after redaction checks.
+
+Files to check: `collect-result.json`, `operations.json`, `summary.txt`.
+
+Escalation data: Attach the bundle if present and list skipped files from `collect-result.json`.
+
+## Report directory could not be created
+
+Symptom: Command exits before writing normal report files.
+
+Likely cause: `C:\ProgramData\kigrepair\Reports` is inaccessible, the configured report root is invalid, disk is full, or security policy blocks writes.
+
+Commands:
+
+```powershell
+Test-Path "C:\ProgramData\kigrepair\Reports"
+New-Item -ItemType Directory -Force "C:\ProgramData\kigrepair\Reports"
+```
+
+Escalation data: Exact configured report root and the filesystem error. Do not rerun mutating commands until report writing works.
 
 ## Report cleanup skipped folder
 

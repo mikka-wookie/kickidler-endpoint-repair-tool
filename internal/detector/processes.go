@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"kigrepair/internal/config"
+	"kigrepair/internal/failures"
+	"kigrepair/internal/winapi"
 )
 
 type ProcessState struct {
@@ -144,14 +145,20 @@ func ClassifyProcess(p RawProcessInfo, opts MatchOptions) ProcessState {
 
 func queryProcesses() ([]RawProcessInfo, error) {
 	script := `$procs = Get-CimInstance Win32_Process | Select-Object ProcessId,Name,ExecutablePath,CommandLine; @($procs) | ConvertTo-Json -Compress -Depth 3`
-	output, err := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script).CombinedOutput()
-	if err != nil {
-		if message := strings.TrimSpace(string(output)); message != "" {
+	result := winapi.RunCommand(winapi.CommandOptions{
+		Name:       "powershell.exe",
+		Args:       []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script},
+		Timeout:    winapi.DefaultProcessQueryTimeout,
+		RedactArgs: true,
+		Category:   failures.FailureProcessControl,
+	})
+	if result.ExitCode != 0 {
+		if message := strings.TrimSpace(result.CombinedOutput()); message != "" {
 			return nil, errors.New(message)
 		}
-		return nil, err
+		return nil, errors.New(result.Error)
 	}
-	return ParseProcessJSON(string(output))
+	return ParseProcessJSON(result.CombinedOutput())
 }
 
 func ParseProcessJSON(data string) ([]RawProcessInfo, error) {

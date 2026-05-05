@@ -2,8 +2,10 @@ package detector
 
 import (
 	"encoding/json"
-	"os/exec"
 	"strings"
+
+	"kigrepair/internal/failures"
+	"kigrepair/internal/winapi"
 )
 
 type DefenderState struct {
@@ -43,14 +45,20 @@ func DetectDefender(system SystemState, mode InstallMode, installRoot string) De
 
 func queryDefenderExclusions() ([]string, error) {
 	script := `$p=(Get-MpPreference).ExclusionPath; if ($null -eq $p) { @() | ConvertTo-Json -Compress } else { @($p) | ConvertTo-Json -Compress }`
-	output, err := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script).CombinedOutput()
-	if err != nil {
-		if message := strings.TrimSpace(string(output)); message != "" {
+	result := winapi.RunCommand(winapi.CommandOptions{
+		Name:       "powershell.exe",
+		Args:       []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script},
+		Timeout:    winapi.DefaultPowerShellTimeout,
+		RedactArgs: true,
+		Category:   failures.FailureDefenderAccess,
+	})
+	if result.ExitCode != 0 {
+		if message := strings.TrimSpace(result.CombinedOutput()); message != "" {
 			return nil, &commandError{message: message}
 		}
-		return nil, err
+		return nil, &commandError{message: result.Error}
 	}
-	data := strings.TrimSpace(string(output))
+	data := strings.TrimSpace(result.CombinedOutput())
 	return parseDefenderExclusionJSON(data)
 }
 

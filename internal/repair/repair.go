@@ -520,7 +520,7 @@ func addInstallerValidationOperation(ctx *app.AppContext, target string, validat
 
 func repairHardFailed(exitCode int) bool {
 	switch exitCode {
-	case ExitCleanupFailed, ExitInstallFailed, ExitVerificationFailed, ExitDefenderFailed, ExitInvalidInput, ExitUnexpectedError:
+	case ExitVerificationFailed, ExitUnexpectedError:
 		return true
 	default:
 		return false

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -17,15 +16,18 @@ import (
 	"kigrepair/internal/app"
 	"kigrepair/internal/config"
 	"kigrepair/internal/detector"
+	"kigrepair/internal/failures"
 	"kigrepair/internal/logging"
 	"kigrepair/internal/safety"
 	svc "kigrepair/internal/services"
+	"kigrepair/internal/winapi"
 )
 
 type CommandResult struct {
 	ExitCode int
 	Output   string
 	Err      error
+	TimedOut bool
 }
 
 type CommandRunner func(name string, args ...string) CommandResult
@@ -147,6 +149,9 @@ func (e Executor) killProcess(action CleanupAction) app.OperationResult {
 	e.logCommandResult("taskkill.exe", result, time.Since(started))
 	if result.ExitCode != 0 {
 		message := "Process termination failed"
+		if result.TimedOut {
+			message = "Process termination timed out"
+		}
 		if strings.Contains(strings.ToLower(result.Output), "access is denied") || strings.Contains(strings.ToLower(result.Output), "access denied") {
 			message = "Process termination failed: run as Administrator"
 		}
@@ -296,16 +301,40 @@ func serviceRunner(run CommandRunner) svc.CommandRunner {
 }
 
 func runCommand(name string, args ...string) CommandResult {
-	output, err := exec.Command(name, args...).CombinedOutput()
-	code := 0
-	if err != nil {
-		code = 1
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			code = exitErr.ExitCode()
+	timeout := 30 * time.Second
+	category := failures.FailureExternalCommand
+	switch strings.ToLower(name) {
+	case "taskkill.exe":
+		timeout = winapi.DefaultProcessTerminateTimeout
+		category = failures.FailureProcessControl
+	case "msiexec.exe":
+		timeout = winapi.DefaultMSITimeout
+		category = failures.FailureMSI
+	case "powershell.exe":
+		timeout = winapi.DefaultPowerShellTimeout
+		category = failures.FailurePowerShell
+	case "reg.exe":
+		timeout = winapi.DefaultRegistryQueryTimeout
+		category = failures.FailureRegistryAccess
+	case "sc.exe":
+		timeout = winapi.DefaultServiceQueryTimeout
+		if len(args) > 0 && strings.EqualFold(args[0], "stop") {
+			timeout = winapi.DefaultServiceStopTimeout
 		}
+		if len(args) > 0 && strings.EqualFold(args[0], "delete") {
+			timeout = winapi.DefaultServiceDeleteTimeout
+		}
+		category = failures.FailureServiceControl
 	}
-	return CommandResult{ExitCode: code, Output: strings.TrimSpace(string(output)), Err: err}
+	result := winapi.RunCommand(winapi.CommandOptions{Name: name, Args: args, Timeout: timeout, Category: category})
+	return CommandResult{ExitCode: result.ExitCode, Output: result.CombinedOutput(), Err: commandErr(result), TimedOut: result.TimedOut}
+}
+
+func commandErr(result winapi.CommandResult) error {
+	if result.Error == "" {
+		return nil
+	}
+	return errors.New(result.Error)
 }
 
 func resultError(result CommandResult) string {

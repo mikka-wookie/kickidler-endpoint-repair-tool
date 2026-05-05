@@ -1,16 +1,18 @@
 package defender
 
 import (
-	"errors"
-	"os/exec"
 	"strconv"
 	"strings"
+
+	"kigrepair/internal/failures"
+	"kigrepair/internal/winapi"
 )
 
 type CommandResult struct {
 	ExitCode int
 	Output   string
 	Err      error
+	TimedOut bool
 }
 
 type ExclusionAdder interface {
@@ -21,16 +23,14 @@ type PowerShellExclusionAdder struct{}
 
 func (PowerShellExclusionAdder) AddExclusion(path string) CommandResult {
 	script := "Add-MpPreference -ExclusionPath " + quotePowerShellString(path)
-	output, err := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script).CombinedOutput()
-	code := 0
-	if err != nil {
-		code = 1
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			code = exitErr.ExitCode()
-		}
-	}
-	return CommandResult{ExitCode: code, Output: strings.TrimSpace(string(output)), Err: err}
+	result := winapi.RunCommand(winapi.CommandOptions{
+		Name:       "powershell.exe",
+		Args:       []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script},
+		Timeout:    winapi.DefaultPowerShellTimeout,
+		RedactArgs: true,
+		Category:   failures.FailureDefenderAccess,
+	})
+	return CommandResult{ExitCode: result.ExitCode, Output: result.CombinedOutput(), Err: commandErr(result), TimedOut: result.TimedOut}
 }
 
 func quotePowerShellString(value string) string {
@@ -38,6 +38,9 @@ func quotePowerShellString(value string) string {
 }
 
 func commandErrorSummary(result CommandResult) string {
+	if result.TimedOut {
+		return "Defender PowerShell command timed out"
+	}
 	if result.Output != "" {
 		return strings.TrimSpace(result.Output)
 	}
@@ -48,4 +51,19 @@ func commandErrorSummary(result CommandResult) string {
 		return "exit code " + strconv.Itoa(result.ExitCode)
 	}
 	return ""
+}
+
+func commandErr(result winapi.CommandResult) error {
+	if result.Error == "" {
+		return nil
+	}
+	return &commandFailure{text: result.Error}
+}
+
+type commandFailure struct {
+	text string
+}
+
+func (e *commandFailure) Error() string {
+	return e.text
 }
