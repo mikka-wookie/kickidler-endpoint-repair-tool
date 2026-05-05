@@ -10,10 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"golang.org/x/sys/windows/registry"
-
 	"kigrepair/internal/config"
 	"kigrepair/internal/detector"
+	"kigrepair/internal/winapi"
 )
 
 const maxHashBytes int64 = 100 * 1024 * 1024
@@ -159,21 +158,13 @@ func captureRegistry(inputKeys []string, report *detector.DetectionReport, warni
 			result = append(result, snapshot)
 			continue
 		}
-		key, err := registry.OpenKey(root, path, registry.QUERY_VALUE)
-		if err != nil {
-			if errors.Is(err, registry.ErrNotExist) {
-				snapshot.Exists = false
-				snapshot.Accessible = true
-			} else {
-				snapshot.Error = err.Error()
-				*warnings = append(*warnings, "Could not query "+target+": "+err.Error())
-			}
-			result = append(result, snapshot)
-			continue
+		key := winapi.QueryRegistryKey(context.Background(), root, path, winapi.RegistryViewDefault)
+		snapshot.Exists = key.Exists
+		snapshot.Accessible = key.Accessible
+		if key.Error != "" {
+			snapshot.Error = key.Error
+			*warnings = append(*warnings, "Could not query "+target+": "+key.Error)
 		}
-		key.Close()
-		snapshot.Exists = true
-		snapshot.Accessible = true
 		result = append(result, snapshot)
 	}
 	return result
@@ -252,20 +243,20 @@ func knownRegistryTargets() []string {
 	}
 }
 
-func splitRegistryTarget(target string) (registry.Key, string, error) {
+func splitRegistryTarget(target string) (string, string, error) {
 	parts := strings.SplitN(target, `\`, 2)
 	if len(parts) != 2 {
-		return 0, "", errors.New("registry target must include root and path")
+		return "", "", errors.New("registry target must include root and path")
 	}
 	switch strings.ToUpper(parts[0]) {
 	case "HKCU":
-		return registry.CURRENT_USER, parts[1], nil
+		return "HKCU", parts[1], nil
 	case "HKLM":
-		return registry.LOCAL_MACHINE, parts[1], nil
+		return "HKLM", parts[1], nil
 	case "HKCR":
-		return registry.CLASSES_ROOT, parts[1], nil
+		return "HKCR", parts[1], nil
 	default:
-		return 0, "", errors.New("unsupported registry root")
+		return "", "", errors.New("unsupported registry root")
 	}
 }
 

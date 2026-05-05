@@ -1,13 +1,12 @@
 package detector
 
 import (
-	"fmt"
 	"os"
 	"os/user"
 	"runtime"
 	"time"
 
-	"golang.org/x/sys/windows"
+	"kigrepair/internal/winapi"
 )
 
 type DetectionReport struct {
@@ -75,7 +74,7 @@ func detectSystemState() SystemState {
 	return SystemState{
 		GOOS:            runtime.GOOS,
 		GOARCH:          runtime.GOARCH,
-		Windows:         windowsVersion(),
+		Windows:         winapi.WindowsVersion(),
 		Hostname:        hostname,
 		Username:        username,
 		SystemRoot:      os.Getenv("SystemRoot"),
@@ -85,32 +84,6 @@ func detectSystemState() SystemState {
 	}
 }
 
-func windowsVersion() string {
-	if runtime.GOOS != "windows" {
-		return ""
-	}
-	version := windows.RtlGetVersion()
-	if version == nil {
-		return os.Getenv("OS")
-	}
-	return fmt.Sprintf("%d.%d.%d", version.MajorVersion, version.MinorVersion, version.BuildNumber)
-}
-
 func isAdmin() bool {
-	var sid *windows.SID
-	if err := windows.AllocateAndInitializeSid(
-		&windows.SECURITY_NT_AUTHORITY,
-		2,
-		windows.SECURITY_BUILTIN_DOMAIN_RID,
-		windows.DOMAIN_ALIAS_RID_ADMINS,
-		0, 0, 0, 0, 0, 0,
-		&sid,
-	); err != nil {
-		return false
-	}
-	defer windows.FreeSid(sid)
-
-	token := windows.Token(0)
-	member, err := token.IsMember(sid)
-	return err == nil && member
+	return winapi.IsAdmin()
 }

@@ -1,12 +1,11 @@
 package checks
 
 import (
-	"fmt"
 	"os"
 	"os/user"
 	"runtime"
 
-	"golang.org/x/sys/windows"
+	"kigrepair/internal/winapi"
 )
 
 func OSName() string {
@@ -45,12 +44,5 @@ func DetectSystemState() SystemState {
 }
 
 func WindowsVersion() string {
-	if runtime.GOOS != "windows" {
-		return ""
-	}
-	version := windows.RtlGetVersion()
-	if version == nil {
-		return os.Getenv("OS")
-	}
-	return fmt.Sprintf("%d.%d.%d", version.MajorVersion, version.MinorVersion, version.BuildNumber)
+	return winapi.WindowsVersion()
 }

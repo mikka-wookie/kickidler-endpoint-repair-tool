@@ -1,6 +1,7 @@
 package detector
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -144,6 +145,18 @@ func ClassifyProcess(p RawProcessInfo, opts MatchOptions) ProcessState {
 }
 
 func queryProcesses() ([]RawProcessInfo, error) {
+	if native, err := winapi.ListProcesses(context.Background()); err == nil {
+		result := make([]RawProcessInfo, 0, len(native))
+		for _, process := range native {
+			result = append(result, RawProcessInfo{
+				ProcessID:      process.ProcessID,
+				Name:           process.Name,
+				ExecutablePath: process.ExecutablePath,
+				CommandLine:    process.CommandLine,
+			})
+		}
+		return result, nil
+	}
 	script := `$procs = Get-CimInstance Win32_Process | Select-Object ProcessId,Name,ExecutablePath,CommandLine; @($procs) | ConvertTo-Json -Compress -Depth 3`
 	result := winapi.RunCommand(winapi.CommandOptions{
 		Name:       "powershell.exe",

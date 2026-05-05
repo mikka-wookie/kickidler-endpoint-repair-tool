@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"kigrepair/internal/winapi"
 )
 
 func StopService(ctx context.Context, name string, opts StopOptions) ServiceActionResult {
@@ -34,15 +36,27 @@ func StopService(ctx context.Context, name string, opts StopOptions) ServiceActi
 		return result
 	}
 
-	stop := opts.Runner("sc.exe", "stop", name)
-	if stop.ExitCode != 0 && !strings.Contains(stop.Output, "1062") {
-		result.Status = "failed"
-		result.Message = "Service stop failed"
-		result.Errors = append(result.Errors, serviceCommandError(stop))
-		if accessDenied(stop.Output) {
-			result.Warnings = append(result.Warnings, "Run as Administrator")
+	if opts.Runner == nil {
+		if err := winapi.StopServiceNative(ctx, name); err != nil {
+			result.Status = "failed"
+			result.Message = "Service stop failed"
+			result.Errors = append(result.Errors, err.Error())
+			if nativeAccessDenied(err) {
+				result.Warnings = append(result.Warnings, "Run as Administrator")
+			}
+			return result
 		}
-		return result
+	} else {
+		stop := opts.Runner("sc.exe", "stop", name)
+		if stop.ExitCode != 0 && !strings.Contains(stop.Output, "1062") {
+			result.Status = "failed"
+			result.Message = "Service stop failed"
+			result.Errors = append(result.Errors, serviceCommandError(stop))
+			if accessDenied(stop.Output) {
+				result.Warnings = append(result.Warnings, "Run as Administrator")
+			}
+			return result
+		}
 	}
 	deadline := time.Now().Add(opts.Timeout)
 	for {
@@ -100,15 +114,27 @@ func DeleteService(ctx context.Context, name string, opts DeleteOptions) Service
 		}
 	}
 
-	del := opts.Runner("sc.exe", "delete", name)
-	if del.ExitCode != 0 {
-		result.Status = "failed"
-		result.Message = "Service deletion failed"
-		result.Errors = append(result.Errors, serviceCommandError(del))
-		if accessDenied(del.Output) {
-			result.Warnings = append(result.Warnings, "Run as Administrator")
+	if opts.Runner == nil {
+		if err := winapi.DeleteServiceNative(ctx, name); err != nil {
+			result.Status = "failed"
+			result.Message = "Service deletion failed"
+			result.Errors = append(result.Errors, err.Error())
+			if nativeAccessDenied(err) {
+				result.Warnings = append(result.Warnings, "Run as Administrator")
+			}
+			return result
 		}
-		return result
+	} else {
+		del := opts.Runner("sc.exe", "delete", name)
+		if del.ExitCode != 0 {
+			result.Status = "failed"
+			result.Message = "Service deletion failed"
+			result.Errors = append(result.Errors, serviceCommandError(del))
+			if accessDenied(del.Output) {
+				result.Warnings = append(result.Warnings, "Run as Administrator")
+			}
+			return result
+		}
 	}
 	deadline := time.Now().Add(opts.Timeout)
 	for {
@@ -135,9 +161,6 @@ func DeleteService(ctx context.Context, name string, opts DeleteOptions) Service
 }
 
 func normalizeStopOptions(opts StopOptions) StopOptions {
-	if opts.Runner == nil {
-		opts.Runner = RunCommand
-	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = DefaultStopTimeout
 	}
@@ -148,9 +171,6 @@ func normalizeStopOptions(opts StopOptions) StopOptions {
 }
 
 func normalizeDeleteOptions(opts DeleteOptions) DeleteOptions {
-	if opts.Runner == nil {
-		opts.Runner = RunCommand
-	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = DefaultDeleteVerifyTimeout
 	}
@@ -184,6 +204,13 @@ func serviceCommandError(result CommandResult) string {
 func accessDenied(output string) bool {
 	lower := strings.ToLower(output)
 	return strings.Contains(lower, "access is denied") || strings.Contains(lower, "access denied") || strings.Contains(lower, "5:")
+}
+
+func nativeAccessDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	return accessDenied(err.Error())
 }
 
 func actionResult(action string, name string, status string, before string, after string, trusted bool, message string, errText string) ServiceActionResult {
