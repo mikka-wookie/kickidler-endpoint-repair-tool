@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"kigrepair/internal/app"
-	"kigrepair/internal/config"
 	"kigrepair/internal/detector"
+	"kigrepair/internal/version"
 )
 
 type SystemInfo struct {
@@ -55,7 +55,7 @@ func (c SystemInfoCollector) Collect(ctx *app.AppContext) app.OperationResult {
 		Temp:             os.Getenv("TEMP"),
 		WorkingDirectory: wd,
 		ExecutablePath:   exe,
-		ToolVersion:      config.Version,
+		ToolVersion:      version.Get().Version,
 	}
 	if err := ctx.Reporter.WriteJSON("system/environment", info); err != nil {
 		return operation("collect.system", "system/environment.json", app.OperationStatusFailed, "Failed to write system/environment.json", err.Error())

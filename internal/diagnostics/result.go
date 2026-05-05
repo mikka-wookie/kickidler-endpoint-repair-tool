@@ -5,9 +5,11 @@ import (
 
 	"kigrepair/internal/classifier"
 	"kigrepair/internal/recommendations"
+	"kigrepair/internal/version"
 )
 
 type CollectReportResult struct {
+	Build            version.Info                          `json:"build"`
 	StartedAt        time.Time                             `json:"started_at"`
 	FinishedAt       time.Time                             `json:"finished_at"`
 	Mode             string                                `json:"mode"`

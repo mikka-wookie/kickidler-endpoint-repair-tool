@@ -9,6 +9,9 @@ dist/
 # Local reports and logs
 /Reports/
 *.log
+*.msi
+*.cab
+kigrepair-support-bundle.zip
 .docs/
 
 # VS Code

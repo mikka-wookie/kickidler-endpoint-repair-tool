@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"kigrepair/internal/detector"
+	"kigrepair/internal/version"
 )
 
 const (
@@ -27,6 +28,7 @@ type Options struct {
 }
 
 type Result struct {
+	Build           version.Info     `json:"build"`
 	Command         string           `json:"command"`
 	Status          string           `json:"status"`
 	ReadyForRepair  bool             `json:"ready_for_repair"`
