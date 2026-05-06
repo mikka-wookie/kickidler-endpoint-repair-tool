@@ -72,7 +72,37 @@ Get-ChildItem ".\dist\kigrepair-0.1.0-windows-amd64" -Recurse -Filter *.msi
 
 Expected: no results.
 
-## E. Publish
+## E. VM Validation
+
+Before pilot:
+
+- Tier 0 smoke completed on at least one Windows 10 or Windows 11 VM.
+- Tier 1 minimum gates completed.
+- Redaction check completed against reports and evidence.
+- Evidence archived in the internal release ticket.
+- Known limitations updated.
+- No raw invite found in reports, support bundles, screenshots, or evidence.
+
+Before internal-stable:
+
+- Expanded Tier 1 completed.
+- Required Tier 2 cases completed or formally waived.
+- Hidden WMI cases completed if applicable.
+- GUI smoke completed if GUI is shipped.
+- Rollback/block criteria reviewed.
+
+Reference from the repository validation workspace:
+
+```powershell
+.\scripts\vm-tests\run-smoke-readonly.ps1 `
+  -KigrepairPath ".\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe" `
+  -OutDir ".\evidence\tier0-smoke" `
+  -Profile standard
+```
+
+See [VM Testing](vm-testing/README.md) and [VM Release Gates](vm-testing/VM-RELEASE-GATES.md).
+
+## F. Publish
 
 Upload or attach:
 
@@ -84,7 +114,7 @@ Upload or attach:
 
 Record whether the build is signed or unsigned.
 
-## F. Rollback
+## G. Rollback
 
 - Keep the previous release zip and checksum.
 - Document how support should revert to the prior release.

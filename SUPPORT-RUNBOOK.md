@@ -56,6 +56,17 @@ For release verification, check `RELEASE-MANIFEST.json`, `checksums.txt`, and `S
 .\scripts\validate-release.ps1 -ReleaseDir ".\dist\kigrepair-<version>-windows-amd64"
 ```
 
+Before pilot or internal-stable rollout, run the VM validation gates from the repository validation workspace:
+
+```powershell
+.\scripts\vm-tests\run-smoke-readonly.ps1 `
+  -KigrepairPath ".\kigrepair.exe" `
+  -OutDir ".\evidence\tier0-smoke" `
+  -Profile standard
+```
+
+Use [docs/vm-testing/VM-RELEASE-GATES.md](docs/vm-testing/VM-RELEASE-GATES.md) for required pilot and internal-stable gates. Attach evidence only after redaction checks pass.
+
 ## 1. Basic Triage
 
 ```powershell
@@ -112,3 +123,4 @@ Use dry-run first. Real report cleanup deletes only validated old report folders
 - [Escalation Checklist](docs/ESCALATION-CHECKLIST.md)
 - [Safety Model](docs/SAFETY-MODEL.md)
 - [GUI Boundary](docs/GUI-BOUNDARY.md)
+- [VM Testing](docs/vm-testing/README.md)

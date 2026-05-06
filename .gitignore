@@ -8,6 +8,7 @@ dist/
 
 # Local reports and logs
 /Reports/
+/evidence/
 *.log
 *.msi
 *.cab
