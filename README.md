@@ -63,6 +63,7 @@ kigrepair-support-bundle.zip
 - [Escalation Checklist](docs/ESCALATION-CHECKLIST.md)
 - [Safety Model](docs/SAFETY-MODEL.md)
 - [GUI Boundary](docs/GUI-BOUNDARY.md)
+- [GUI MVP](docs/GUI-MVP.md)
 - [Release Checklist](docs/RELEASE-CHECKLIST.md)
 - [Short Support Runbook](SUPPORT-RUNBOOK.md)
 
@@ -93,7 +94,7 @@ dist\kigrepair-0.1.0-windows-amd64\
 dist\kigrepair-0.1.0-windows-amd64.zip
 ```
 
-Release folder layout includes `kigrepair.exe`, `README.md`, `SUPPORT-RUNBOOK.md`, `docs\`, `assets\README.txt`, `examples\commands.ps1`, `examples\kigrepair.sample.yaml`, and checksums.
+Release folder layout includes `kigrepair.exe`, `README.md`, `SUPPORT-RUNBOOK.md`, `docs\`, `assets\README.txt`, `examples\commands.ps1`, `examples\kigrepair.sample.yaml`, and checksums. Add `-IncludeGui` to also build and checksum `kigrepair-gui.exe`.
 
 The release script does not bundle Grabber MSI installers. Support engineers must place approved MSI files locally when needed.
 
@@ -104,10 +105,11 @@ gofmt -w .
 go mod tidy
 go test ./...
 go build -o kigrepair.exe ./cmd/kigrepair
+go build -o kigrepair-gui.exe ./cmd/kigrepair-gui
 ```
 
 ## Architecture
 
 The project is split into internal packages for app context, workflows, configuration, detection, cleanup, installation, Defender integration, diagnostics, reports, safety validation, Windows wrappers, logging, and future UI surfaces. Keep workflow orchestration separate from low-level Windows operations.
 
-Future GUI code must use the workflow service boundary in `internal/app` and `internal/app/workflowservice`. It must not shell out to `kigrepair.exe` or parse console output.
+The GUI MVP uses the workflow service boundary in `internal/app` and `internal/app/workflowservice`. It must not shell out to `kigrepair.exe`, parse console output, or store invite values.

@@ -38,6 +38,8 @@ Policy metadata appears in `config-metadata.json` and compactly in policy-aware 
 
 Workflow service responses return paths to report files instead of embedding support evidence blobs. Reports remain the source of evidence for CLI and any future GUI.
 
+The GUI MVP displays report paths returned by the workflow service. It does not create a separate evidence format; `summary.txt`, `operations.json`, primary result JSON, `repair.log`, and `kigrepair-support-bundle.zip` remain the support artifacts.
+
 ## File Reference
 
 | File | Purpose | Produced by | How support should read it | Warnings/errors | Included in bundle |

@@ -17,7 +17,18 @@ Global observability flags:
 
 Workflow reports include a Run ID, operation IDs, a support-readable timeline in `summary.txt`, structured operation records in `operations.json`, and redacted JSONL events in `repair.log`.
 
-The CLI remains the primary interface. A future GUI must call the shared workflow service boundary instead of shelling out to `kigrepair.exe` or parsing console text. See [GUI Boundary](GUI-BOUNDARY.md).
+The CLI remains the primary automation interface. The GUI MVP calls the shared workflow service boundary instead of shelling out to `kigrepair.exe` or parsing console text. See [GUI Boundary](GUI-BOUNDARY.md) and [GUI MVP](GUI-MVP.md).
+
+## GUI MVP
+
+Build and launch on Windows:
+
+```powershell
+go build -o kigrepair-gui.exe ./cmd/kigrepair-gui
+.\kigrepair-gui.exe
+```
+
+The GUI exposes Check, Verify, Preflight, Repair Dry-Run, Real Repair, Collect Report, Reports List, and Reports Cleanup Dry-Run. Real Repair still requires administrator rights, installer path, invite, policy readiness, rollback support, and exact `YES` confirmation.
 
 ## Command Safety Classes
 
