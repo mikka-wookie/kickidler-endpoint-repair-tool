@@ -99,6 +99,8 @@ type mainWindow struct {
 	controller    *Controller
 	controls      map[int]windows.Handle
 	latestReport  string
+	latestSummary string
+	reportRoot    string
 	configSource  string
 	activeProfile string
 	admin         bool
@@ -112,6 +114,10 @@ func runGUI() error {
 	if err == nil {
 		w.configSource = effective.Metadata().Path
 		w.activeProfile = effective.Config.Profile
+		w.reportRoot = effective.Config.Reports.Root
+	}
+	if strings.TrimSpace(w.reportRoot) == "" {
+		w.reportRoot = config.DefaultReportRoot
 	}
 	w.admin = winapi.IsAdmin()
 	return w.run()
@@ -163,36 +169,39 @@ func (w *mainWindow) run() error {
 }
 
 func (w *mainWindow) createControls() {
-	createStatic(w.hwnd, "Status / Dashboard", 16, 12, 220, 22)
-	createButton(w, idCheck, "Check", 16, 40, 95, 28)
-	createButton(w, idVerify, "Verify", 118, 40, 95, 28)
-	createButton(w, idCollect, "Collect Report", 220, 40, 120, 28)
-	createButton(w, idOpenReports, "Open Reports Folder", 348, 40, 150, 28)
-	createButton(w, idRestartAdmin, "Restart as Administrator", 506, 40, 170, 28)
+	createStatic(w.hwnd, "Header", 16, 12, 220, 22)
+	w.controls[idSummary] = createEdit(w.hwnd, "", 16, 38, 930, 108, esMultiLine|esReadOnly|wsVScroll)
 
-	createStatic(w.hwnd, "Repair Preparation", 16, 86, 220, 22)
-	createStatic(w.hwnd, "Installer:", 16, 116, 70, 22)
-	w.controls[idInstaller] = createEdit(w.hwnd, "", 88, 114, 560, 24, esAutoHScroll)
-	createButton(w, idBrowseInstaller, "Browse installer", 656, 112, 125, 28)
-	createStatic(w.hwnd, "Invite:", 16, 148, 70, 22)
-	w.controls[idInvite] = createEdit(w.hwnd, "", 88, 146, 300, 24, esAutoHScroll|esPassword)
-	createStatic(w.hwnd, "Profile:", 408, 148, 70, 22)
-	w.controls[idProfile] = createEdit(w.hwnd, "standard", 480, 146, 110, 24, esAutoHScroll)
-	createStatic(w.hwnd, "standard / conservative / diagnostic", 600, 148, 250, 22)
-	createButton(w, idPreflight, "Preflight", 16, 184, 100, 28)
-	createButton(w, idRepairDryRun, "Repair Dry-Run", 124, 184, 125, 28)
-	createButton(w, idRepair, "Real Repair", 276, 184, 120, 32)
-	createButton(w, idCancel, "Cancel", 404, 184, 90, 32)
+	createStatic(w.hwnd, "Quick Actions", 16, 158, 220, 22)
+	createButton(w, idCheck, "Check", 16, 184, 95, 30)
+	createButton(w, idVerify, "Verify", 118, 184, 95, 30)
+	createButton(w, idCollect, "Collect Bundle", 220, 184, 125, 30)
+	createButton(w, idOpenReports, "Open Reports Folder", 352, 184, 160, 30)
+	createButton(w, idRestartAdmin, "Restart as Administrator", 520, 184, 180, 30)
+	createButton(w, idCancel, "Cancel", 708, 184, 90, 30)
 
-	createStatic(w.hwnd, "Results / Timeline", 16, 232, 220, 22)
-	w.controls[idSummary] = createEdit(w.hwnd, "", 16, 260, 930, 116, esMultiLine|esReadOnly|wsVScroll)
-	w.controls[idTimeline] = createEdit(w.hwnd, "", 16, 386, 930, 190, esMultiLine|esReadOnly|wsVScroll)
+	createStatic(w.hwnd, "Repair Preparation", 16, 228, 220, 22)
+	createStatic(w.hwnd, "Installer:", 16, 258, 70, 22)
+	w.controls[idInstaller] = createEdit(w.hwnd, "", 88, 256, 560, 24, esAutoHScroll)
+	createButton(w, idBrowseInstaller, "Browse", 656, 254, 90, 28)
+	createStatic(w.hwnd, "Invite:", 16, 290, 70, 22)
+	w.controls[idInvite] = createEdit(w.hwnd, "", 88, 288, 300, 24, esAutoHScroll|esPassword)
+	createStatic(w.hwnd, "Profile:", 408, 290, 70, 22)
+	w.controls[idProfile] = createEdit(w.hwnd, emptyAs(w.activeProfile, "standard"), 480, 288, 130, 24, esAutoHScroll)
+	createStatic(w.hwnd, "standard / conservative / diagnostic", 620, 290, 250, 22)
+	createButton(w, idPreflight, "Preflight", 16, 326, 100, 30)
+	createButton(w, idRepairDryRun, "Repair Dry-Run", 124, 326, 130, 30)
+	createButton(w, idRepair, "RUN REAL REPAIR", 304, 322, 170, 38)
 
-	createStatic(w.hwnd, "Reports", 16, 590, 220, 22)
-	w.controls[idReports] = createEdit(w.hwnd, "", 16, 616, 610, 44, esMultiLine|esReadOnly|wsVScroll)
-	createButton(w, idOpenSelectedReport, "Open report folder", 642, 616, 140, 28)
-	createButton(w, idReportsList, "Reports List", 790, 616, 100, 28)
+	createStatic(w.hwnd, "Timeline", 16, 378, 220, 22)
+	w.controls[idTimeline] = createEdit(w.hwnd, "", 16, 404, 930, 170, esMultiLine|esReadOnly|wsVScroll)
+
+	createStatic(w.hwnd, "Details", 16, 588, 220, 22)
+	w.controls[idReports] = createEdit(w.hwnd, "", 16, 614, 610, 58, esMultiLine|esReadOnly|wsVScroll)
+	createButton(w, idOpenSelectedReport, "Open Summary", 642, 614, 130, 30)
+	createButton(w, idReportsList, "Reports List", 780, 614, 110, 30)
 	createButton(w, idReportsCleanupDry, "Cleanup Dry-Run", 642, 650, 140, 28)
+	enable(w.controls[idCancel], false)
 }
 
 func (w *mainWindow) windowProc(hwnd uintptr, msgID uint32, wparam uintptr, lparam uintptr) uintptr {
@@ -233,7 +242,7 @@ func (w *mainWindow) handleCommand(id int) {
 		w.runAction(ActionRepairDryRun)
 	case idRepair:
 		if !w.admin {
-			w.showError("Administrator rights are required for real repair. Restart as Administrator, then run Real Repair again.")
+			w.showError("Administrator rights are required for real repair. Use Restart as Administrator, then run Real Repair again.")
 			return
 		}
 		w.runAction(ActionRepair)
@@ -241,8 +250,20 @@ func (w *mainWindow) handleCommand(id int) {
 		w.runAction(ActionReportsCleanupDry)
 	case idCancel:
 		w.controller.Cancel()
-	case idOpenReports, idOpenSelectedReport:
-		if err := OpenPath(w.latestReport); err != nil {
+	case idOpenReports:
+		target := w.reportRoot
+		if strings.TrimSpace(target) == "" {
+			target = w.latestReport
+		}
+		if err := OpenPath(target); err != nil {
+			w.showError(err.Error())
+		}
+	case idOpenSelectedReport:
+		target := w.latestSummary
+		if strings.TrimSpace(target) == "" {
+			target = w.latestReport
+		}
+		if err := OpenPath(target); err != nil {
 			w.showError(err.Error())
 		}
 	case idBrowseInstaller:
@@ -283,6 +304,9 @@ func (w *mainWindow) updateDashboard(view ResultView) {
 	if view.ReportDir != "" {
 		w.latestReport = view.ReportDir
 	}
+	if view.SummaryFile != "" {
+		w.latestSummary = view.SummaryFile
+	}
 	info := version.Get()
 	admin := "no"
 	if w.admin {
@@ -292,13 +316,10 @@ func (w *mainWindow) updateDashboard(view ResultView) {
 		view.Status = "idle"
 	}
 	prefix := []string{
-		"App version: " + info.Version,
-		"Commit: " + info.Commit,
-		"Build date: " + info.BuildDate,
-		"Signed status: " + info.SignedStatus,
-		"Active profile: " + emptyAs(w.activeProfile, emptyAs(getText(w.controls[idProfile]), "standard")),
-		"Config source: " + emptyAs(w.configSource, "defaults"),
-		"Admin: " + admin,
+		"kigrepair support dashboard",
+		"Version: " + info.Version + "  Commit: " + info.Commit + "  Build: " + info.BuildDate,
+		"Profile: " + emptyAs(getText(w.controls[idProfile]), emptyAs(w.activeProfile, "standard")) + "  Admin: " + admin + "  Latest RunID: " + emptyAs(view.RunID, "not available"),
+		"Config: " + emptyAs(w.configSource, "defaults"),
 	}
 	setText(w.controls[idSummary], strings.Join(prefix, "\r\n")+"\r\n"+FormatResultSummary(view))
 	setText(w.controls[idTimeline], FormatTimeline(view.Timeline))

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,18 +35,18 @@ func NewDefault() *Service {
 }
 
 func (s *Service) Check(ctx context.Context, req app.CheckRequest) (*app.CheckResponse, error) {
-	return s.execute(ctx, req.CommonRequest, checks.CheckWorkflow{}, "initial-detection.json")
+	return s.execute(ctx, req.CommonRequest, checks.CheckWorkflow{}, "initial-detection.json", nil)
 }
 
 func (s *Service) Verify(ctx context.Context, req app.VerifyRequest) (*app.VerifyResponse, error) {
-	return s.execute(ctx, req.CommonRequest, verifier.VerifyWorkflow{}, "verification-result.json")
+	return s.execute(ctx, req.CommonRequest, verifier.VerifyWorkflow{}, "verification-result.json", nil)
 }
 
 func (s *Service) Preflight(ctx context.Context, req app.PreflightRequest) (*app.PreflightResponse, error) {
 	return s.execute(ctx, req.CommonRequest, preflight.Workflow{
 		InstallerPath: req.InstallerPath,
 		HasInvite:     strings.TrimSpace(req.InviteValue) != "",
-	}, "preflight-result.json")
+	}, "preflight-result.json", []string{req.InviteValue})
 }
 
 func (s *Service) RepairPlan(ctx context.Context, req app.RepairPlanRequest) (*app.RepairPlanResponse, error) {
@@ -55,7 +56,7 @@ func (s *Service) RepairPlan(ctx context.Context, req app.RepairPlanRequest) (*a
 		Invite:    req.InviteValue,
 		Installer: req.InstallerPath,
 		Yes:       req.Yes,
-	}, "repair-plan.json")
+	}, "repair-plan.json", []string{req.InviteValue})
 }
 
 func (s *Service) Repair(ctx context.Context, req app.RepairRequest) (*app.RepairResponse, error) {
@@ -63,17 +64,17 @@ func (s *Service) Repair(ctx context.Context, req app.RepairRequest) (*app.Repai
 		Invite:    req.InviteValue,
 		Installer: req.InstallerPath,
 		Yes:       req.Yes,
-	}, "repair-result.json")
+	}, "repair-result.json", []string{req.InviteValue})
 }
 
 func (s *Service) CleanupPlan(ctx context.Context, req app.CleanupPlanRequest) (*app.CleanupPlanResponse, error) {
 	common := req.CommonRequest
 	common.DryRun = true
-	return s.execute(ctx, common, cleaner.CleanupWorkflow{DryRun: true, Yes: req.Yes}, "cleanup-plan.json")
+	return s.execute(ctx, common, cleaner.CleanupWorkflow{DryRun: true, Yes: req.Yes}, "cleanup-plan.json", nil)
 }
 
 func (s *Service) Cleanup(ctx context.Context, req app.CleanupRequest) (*app.CleanupResponse, error) {
-	return s.execute(ctx, req.CommonRequest, cleaner.CleanupWorkflow{DryRun: req.DryRun, Yes: req.Yes}, "cleanup-result.json")
+	return s.execute(ctx, req.CommonRequest, cleaner.CleanupWorkflow{DryRun: req.DryRun, Yes: req.Yes}, "cleanup-result.json", nil)
 }
 
 func (s *Service) CollectReport(ctx context.Context, req app.CollectReportRequest) (*app.CollectReportResponse, error) {
@@ -82,7 +83,7 @@ func (s *Service) CollectReport(ctx context.Context, req app.CollectReportReques
 		IncludeHistory:   req.IncludeHistory,
 		HistoryLimit:     req.HistoryLimit,
 		NoZip:            req.NoZip,
-	}, "collect-result.json")
+	}, "collect-result.json", nil)
 }
 
 func (s *Service) ReportsList(ctx context.Context, req app.ReportsListRequest) (*app.ReportsListResponse, error) {
@@ -118,7 +119,7 @@ func (s *Service) ReportsCleanupPlan(ctx context.Context, req app.ReportsCleanup
 		KeepLast:  req.KeepLast,
 		DryRun:    true,
 		Yes:       req.Yes,
-	}, "report-cleanup-plan.json")
+	}, "report-cleanup-plan.json", nil)
 }
 
 func (s *Service) ReportsCleanup(ctx context.Context, req app.ReportsCleanupRequest) (*app.ReportsCleanupResponse, error) {
@@ -127,7 +128,7 @@ func (s *Service) ReportsCleanup(ctx context.Context, req app.ReportsCleanupRequ
 		KeepLast:  req.KeepLast,
 		DryRun:    req.DryRun,
 		Yes:       req.Yes,
-	}, "report-cleanup-result.json")
+	}, "report-cleanup-result.json", nil)
 }
 
 func (s *Service) ConfigShow(ctx context.Context, req app.ConfigShowRequest) (*app.ConfigShowResponse, error) {
@@ -168,15 +169,20 @@ func (s *Service) GetWorkflowCatalog(context.Context) app.WorkflowCatalog {
 	return app.DefaultWorkflowCatalog()
 }
 
-func (s *Service) execute(ctx context.Context, req app.CommonRequest, workflow app.Workflow, primary string) (*app.WorkflowResponse, error) {
-	return s.ExecuteWorkflow(ctx, req, workflow, primary)
+func (s *Service) execute(ctx context.Context, req app.CommonRequest, workflow app.Workflow, primary string, sensitive []string) (*app.WorkflowResponse, error) {
+	return s.ExecuteWorkflowWithSensitive(ctx, req, workflow, primary, sensitive)
 }
 
 func (s *Service) ExecuteWorkflow(ctx context.Context, req app.CommonRequest, workflow app.Workflow, primary string) (*app.WorkflowResponse, error) {
+	return s.ExecuteWorkflowWithSensitive(ctx, req, workflow, primary, nil)
+}
+
+func (s *Service) ExecuteWorkflowWithSensitive(ctx context.Context, req app.CommonRequest, workflow app.Workflow, primary string, sensitive []string) (*app.WorkflowResponse, error) {
 	resp, runCtx, err := s.prepare(ctx, req, workflow.Name(), readOnly(workflow, req))
 	if err != nil {
 		return resp, err
 	}
+	runCtx.SensitiveValues = compactSecrets(sensitive)
 	if cancelled := s.cancelled(ctx, runCtx, resp); cancelled {
 		return resp, nil
 	}
@@ -298,6 +304,7 @@ func (s *Service) finish(runCtx *app.AppContext, resp *app.WorkflowResponse, pri
 	runCtx.FinishRun()
 	if runCtx.Reporter != nil {
 		_ = runCtx.Reporter.WriteOperations(runCtx.Results)
+		_ = ensureSummaryFile(runCtx)
 	}
 	resp.Meta = metaFromContext(runCtx, primary)
 	if priorStatus == string(app.WorkflowStatusCancelled) {
@@ -311,9 +318,10 @@ func (s *Service) finish(runCtx *app.AppContext, resp *app.WorkflowResponse, pri
 	resp.Warnings = append(resp.Warnings, stringSliceField(runCtx.JSONValue, "Warnings")...)
 	resp.Errors = append(resp.Errors, stringSliceField(runCtx.JSONValue, "Errors")...)
 	if err != nil {
-		resp.Errors = append(resp.Errors, err.Error())
+		resp.Errors = append(resp.Errors, runCtx.RedactString(err.Error()))
 	}
-	return resp, err
+	redactResponse(runCtx, resp)
+	return resp, sanitizeErr(runCtx, err)
 }
 
 func baseResponse(runCtx *app.AppContext, command string) *app.WorkflowResponse {
@@ -428,6 +436,91 @@ func stringSliceField(value any, field string) []string {
 		}
 	}
 	return result
+}
+
+func compactSecrets(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
+func redactResponse(ctx *app.AppContext, resp *app.WorkflowResponse) {
+	if ctx == nil || resp == nil {
+		return
+	}
+	resp.Meta.ReportDir = ctx.RedactString(resp.Meta.ReportDir)
+	resp.Meta.SummaryFile = ctx.RedactString(resp.Meta.SummaryFile)
+	resp.Meta.OperationsFile = ctx.RedactString(resp.Meta.OperationsFile)
+	resp.Meta.PrimaryResultFile = ctx.RedactString(resp.Meta.PrimaryResultFile)
+	resp.Warnings = redactStrings(ctx, resp.Warnings)
+	resp.Errors = redactStrings(ctx, resp.Errors)
+	for i := range resp.Timeline {
+		resp.Timeline[i] = ctx.RedactOperationResult(resp.Timeline[i])
+	}
+	resp.Result = redactValue(ctx, resp.Result)
+}
+
+func redactStrings(ctx *app.AppContext, values []string) []string {
+	for i := range values {
+		values[i] = ctx.RedactString(values[i])
+	}
+	return values
+}
+
+func redactValue(ctx *app.AppContext, value any) any {
+	if value == nil {
+		return nil
+	}
+	if len(ctx.SensitiveValues) == 0 {
+		return value
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	redacted := ctx.RedactString(string(data))
+	var decoded any
+	if err := json.Unmarshal([]byte(redacted), &decoded); err != nil {
+		return value
+	}
+	return decoded
+}
+
+func sanitizeErr(ctx *app.AppContext, err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.New(ctx.RedactString(err.Error()))
+}
+
+func ensureSummaryFile(ctx *app.AppContext) error {
+	if ctx == nil || ctx.Reporter == nil || strings.TrimSpace(ctx.OutputDir) == "" {
+		return nil
+	}
+	path := filepath.Join(ctx.OutputDir, "summary.txt")
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	status := workflowStatus(ctx.ExitCode, nil)
+	var b strings.Builder
+	b.WriteString("Kigrepair Workflow Summary\n\n")
+	b.WriteString("Workflow: " + ctx.Run.WorkflowName + "\n")
+	b.WriteString("Status: " + status + "\n")
+	b.WriteString("Exit code: " + strconv.Itoa(ctx.ExitCode) + "\n")
+	b.WriteString("Report directory: " + ctx.OutputDir + "\n")
+	if len(ctx.Results) > 0 {
+		b.WriteString("\n")
+		b.WriteString(reports.FormatOperationTimeline(ctx.Results))
+	}
+	return ctx.Reporter.WriteText("summary", ctx.RedactString(b.String()))
 }
 
 var _ app.WorkflowService = (*Service)(nil)

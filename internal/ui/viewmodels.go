@@ -27,16 +27,18 @@ func BuildResultView(resp *app.WorkflowResponse) ResultView {
 	}
 	for _, op := range resp.Timeline {
 		view.Timeline = append(view.Timeline, TimelineItem{
-			Time:    op.Timestamp,
-			Stage:   "operation",
-			Step:    safety.RedactString(op.Step),
-			Target:  safety.RedactString(op.Target),
-			Status:  string(op.Status),
-			Message: safety.RedactString(op.Message),
+			Time:            op.Timestamp,
+			Stage:           "operation",
+			Step:            safety.RedactString(firstNonEmptyString(op.ID, op.Step)),
+			Target:          safety.RedactString(op.Target),
+			Status:          string(op.Status),
+			Message:         safety.RedactString(op.Message),
+			DurationMS:      op.DurationMS,
+			FailureCategory: safety.RedactString(op.FailureCategory),
 		})
 	}
 	extractResultSummary(&view, resp.Result)
-	if view.ReportDir != "" {
+	if view.SupportBundlePath == "" && view.ReportDir != "" && resp.Meta.Workflow == "collect-report" {
 		view.SupportBundlePath = filepath.Join(view.ReportDir, "kigrepair-support-bundle.zip")
 	}
 	return view
@@ -63,6 +65,12 @@ func FormatTimeline(items []TimelineItem) string {
 		if item.Target != "" {
 			fmt.Fprintf(&b, " (%s)", item.Target)
 		}
+		if item.DurationMS > 0 {
+			fmt.Fprintf(&b, " in %d ms", item.DurationMS)
+		}
+		if item.FailureCategory != "" && strings.EqualFold(item.Status, string(app.OperationStatusFailed)) {
+			fmt.Fprintf(&b, " - %s", item.FailureCategory)
+		}
 		b.WriteString("\r\n")
 	}
 	return strings.TrimRight(b.String(), "\r\n")
@@ -76,13 +84,18 @@ func FormatResultSummary(view ResultView) string {
 		"Report: " + emptyAs(view.ReportDir, "not available"),
 	}
 	if view.Classification != "" {
-		lines = append(lines, "Classification: "+view.Classification)
+		lines = append(lines, "Health: "+view.Classification)
+	}
+	if view.InstallMode != "" {
+		lines = append(lines, "Install mode: "+view.InstallMode)
 	}
 	if view.PrimaryIssueCode != "" {
 		lines = append(lines, "Primary issue: "+view.PrimaryIssueCode)
 	}
-	if view.NextRecommendedAction != "" {
-		lines = append(lines, "Next action: "+view.NextRecommendedAction)
+	if view.Recommendation != "" {
+		lines = append(lines, "Recommendation: "+view.Recommendation)
+	} else if view.NextRecommendedAction != "" {
+		lines = append(lines, "Recommendation: "+view.NextRecommendedAction)
 	}
 	if len(view.Errors) > 0 {
 		lines = append(lines, "Errors: "+strings.Join(view.Errors, "; "))
@@ -124,19 +137,47 @@ func extractResultSummary(view *ResultView, value any) {
 	view.Recommendation = firstString(decoded, "Recommendation", "Summary")
 	view.PrimaryIssueCode = firstString(decoded, "PrimaryIssueCode", "PrimaryIssue", "IssueCode")
 	view.NextRecommendedAction = firstString(decoded, "NextRecommendedAction", "NextAction")
+	view.SupportBundlePath = firstString(decoded, "BundlePath", "SupportBundlePath")
+	view.InstallMode = firstString(decoded, "InstallMode", "InitialInstallMode", "FinalInstallMode")
+	extractNestedResultSummary(view, decoded)
 	if reports := stringSlice(decoded, "Reports", "ReportDirs"); len(reports) > 0 {
 		view.Reports = reports
 	}
 }
 
+func extractNestedResultSummary(view *ResultView, decoded map[string]any) {
+	if view == nil {
+		return
+	}
+	if classification, ok := decoded["classification"].(map[string]any); ok {
+		if view.Classification == "" {
+			view.Classification = firstString(classification, "Health", "Status")
+		}
+		if issue, ok := classification["primary_issue"].(map[string]any); ok && view.PrimaryIssueCode == "" {
+			view.PrimaryIssueCode = firstString(issue, "Code")
+		}
+	}
+	if recommendation, ok := decoded["recommendation"].(map[string]any); ok {
+		if action, ok := recommendation["primary_action"].(map[string]any); ok {
+			if view.NextRecommendedAction == "" {
+				view.NextRecommendedAction = firstString(action, "Code")
+			}
+			if view.Recommendation == "" {
+				view.Recommendation = firstString(action, "Message", "Code")
+			}
+		}
+		if view.Recommendation == "" {
+			view.Recommendation = firstString(recommendation, "Status")
+		}
+	}
+}
+
 func firstString(decoded map[string]any, keys ...string) string {
 	for _, key := range keys {
-		if value, ok := decoded[key].(string); ok {
-			return safety.RedactString(value)
-		}
-		key = strings.ToLower(key[:1]) + key[1:]
-		if value, ok := decoded[key].(string); ok {
-			return safety.RedactString(value)
+		for _, candidate := range []string{key, strings.ToLower(key[:1]) + key[1:], camelToSnake(key)} {
+			if value, ok := decoded[candidate].(string); ok {
+				return safety.RedactString(value)
+			}
 		}
 	}
 	return ""
@@ -144,7 +185,7 @@ func firstString(decoded map[string]any, keys ...string) string {
 
 func stringSlice(decoded map[string]any, keys ...string) []string {
 	for _, key := range keys {
-		for _, candidate := range []string{key, strings.ToLower(key[:1]) + key[1:]} {
+		for _, candidate := range []string{key, strings.ToLower(key[:1]) + key[1:], camelToSnake(key)} {
 			raw, ok := decoded[candidate].([]any)
 			if !ok {
 				continue
@@ -161,6 +202,17 @@ func stringSlice(decoded map[string]any, keys ...string) []string {
 	return nil
 }
 
+func camelToSnake(value string) string {
+	var b strings.Builder
+	for i, r := range value {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			b.WriteByte('_')
+		}
+		b.WriteRune(r)
+	}
+	return strings.ToLower(b.String())
+}
+
 func redactSlice(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -174,4 +226,13 @@ func emptyAs(value string, fallback string) string {
 		return fallback
 	}
 	return safety.RedactString(value)
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

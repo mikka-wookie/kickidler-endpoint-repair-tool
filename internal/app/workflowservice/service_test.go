@@ -3,6 +3,8 @@ package workflowservice
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -70,6 +72,42 @@ func TestExecuteWorkflowProgressAndRedaction(t *testing.T) {
 	}
 }
 
+func TestExecuteWorkflowRedactsSensitiveValuesFromResponse(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewDefault()
+	resp, err := svc.ExecuteWorkflowWithSensitive(context.Background(), app.CommonRequest{OutputDir: dir}, fakeWorkflow{name: "fake"}, "fake-result.json", []string{"REAL-SECRET-INVITE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(resp)
+	if strings.Contains(string(encoded), "REAL-SECRET-INVITE") {
+		t.Fatalf("response leaked sensitive value: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), "REDACTED") {
+		t.Fatalf("response did not show redaction marker: %s", encoded)
+	}
+}
+
+func TestExecuteWorkflowWritesReportsOnWorkflowFailure(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewDefault()
+	resp, err := svc.ExecuteWorkflow(context.Background(), app.CommonRequest{OutputDir: dir}, failingWorkflow{name: "fake-fail"}, "fake-result.json")
+	if err == nil {
+		t.Fatal("expected workflow error")
+	}
+	if resp.Meta.Status != string(app.WorkflowStatusFailed) {
+		t.Fatalf("status = %q, want failed", resp.Meta.Status)
+	}
+	for _, path := range []string{resp.Meta.OperationsFile, resp.Meta.SummaryFile} {
+		if path == "" {
+			t.Fatalf("missing report path in response: %#v", resp.Meta)
+		}
+		if _, statErr := os.Stat(path); statErr != nil {
+			t.Fatalf("expected report file %s: %v", path, statErr)
+		}
+	}
+}
+
 func TestCancelledContextProducesCancelledResponse(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -101,4 +139,22 @@ func requireEntry(t *testing.T, catalog app.WorkflowCatalog, name string, readOn
 		return
 	}
 	t.Fatalf("catalog entry %q not found", name)
+}
+
+type failingWorkflow struct {
+	name string
+}
+
+func (w failingWorkflow) Name() string { return w.name }
+
+func (w failingWorkflow) Run(ctx *app.AppContext) error {
+	ctx.AddResult(app.OperationResult{
+		Step:      "fake.failed",
+		Target:    "fake",
+		Status:    app.OperationStatusFailed,
+		Message:   "failed",
+		Timestamp: time.Now(),
+	})
+	ctx.ExitCode = app.ExitUnexpectedError
+	return errors.New("workflow failed")
 }

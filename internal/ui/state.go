@@ -52,6 +52,7 @@ type ResultView struct {
 	PrimaryResultFile     string
 	SupportBundlePath     string
 	Classification        string
+	InstallMode           string
 	Recommendation        string
 	PrimaryIssueCode      string
 	NextRecommendedAction string
@@ -62,12 +63,14 @@ type ResultView struct {
 }
 
 type TimelineItem struct {
-	Time    time.Time
-	Stage   string
-	Step    string
-	Target  string
-	Status  string
-	Message string
+	Time            time.Time
+	Stage           string
+	Step            string
+	Target          string
+	Status          string
+	Message         string
+	DurationMS      int64
+	FailureCategory string
 }
 
 type Controller struct {
@@ -243,12 +246,14 @@ func (c *Controller) progressTimeline() []TimelineItem {
 			when = event.FinishedAt
 		}
 		items = append(items, TimelineItem{
-			Time:    when,
-			Stage:   event.Stage,
-			Step:    event.OperationID,
-			Target:  event.ResultFile,
-			Status:  string(event.Status),
-			Message: event.Message,
+			Time:            when,
+			Stage:           event.Stage,
+			Step:            event.OperationID,
+			Target:          event.ResultFile,
+			Status:          string(event.Status),
+			Message:         event.Message,
+			DurationMS:      event.DurationMS,
+			FailureCategory: event.FailureCategory,
 		})
 	}
 	return items
