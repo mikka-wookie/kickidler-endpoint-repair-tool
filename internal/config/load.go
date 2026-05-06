@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -13,10 +14,11 @@ import (
 const ConfigFileName = "kigrepair.yaml"
 
 type LoadOptions struct {
-	ExplicitPath   string
-	ExeDir         string
-	ProgramDataDir string
-	WorkDir        string
+	ExplicitPath    string
+	ProfileOverride string
+	ExeDir          string
+	ProgramDataDir  string
+	WorkDir         string
 }
 
 func Load(opts LoadOptions) (EffectiveConfig, error) {
@@ -26,14 +28,26 @@ func Load(opts LoadOptions) (EffectiveConfig, error) {
 	}
 	if path == "" {
 		cfg := DefaultConfig()
+		overridden := false
+		if strings.TrimSpace(opts.ProfileOverride) != "" {
+			profileCfg, ok := ConfigForProfile(strings.TrimSpace(opts.ProfileOverride))
+			if !ok {
+				return EffectiveConfig{}, fmt.Errorf("unknown profile name: %s", opts.ProfileOverride)
+			}
+			cfg = profileCfg
+			overridden = true
+		}
 		warnings := ValidateConfig(cfg)
-		return EffectiveConfig{Config: cfg, Warnings: warnings.Warnings}, nil
+		if len(warnings.Errors) > 0 {
+			return EffectiveConfig{Config: cfg, Warnings: warnings.Warnings, ProfileOverriddenByCLI: overridden}, errors.New(strings.Join(warnings.Errors, "; "))
+		}
+		return EffectiveConfig{Config: cfg, Warnings: warnings.Warnings, ProfileOverriddenByCLI: overridden}, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return EffectiveConfig{}, fmt.Errorf("read config %q: %w", path, err)
 	}
-	effective, err := Parse(data)
+	effective, err := ParseWithProfileOverride(data, opts.ProfileOverride)
 	if err != nil {
 		return EffectiveConfig{}, fmt.Errorf("parse config %q: %w", path, err)
 	}
@@ -50,6 +64,10 @@ func Load(opts LoadOptions) (EffectiveConfig, error) {
 }
 
 func Parse(data []byte) (EffectiveConfig, error) {
+	return ParseWithProfileOverride(data, "")
+}
+
+func ParseWithProfileOverride(data []byte, profileOverride string) (EffectiveConfig, error) {
 	var node yaml.Node
 	if err := yaml.Unmarshal(data, &node); err != nil {
 		return EffectiveConfig{}, err
@@ -73,17 +91,24 @@ func Parse(data []byte) (EffectiveConfig, error) {
 	}
 
 	profile := strings.TrimSpace(header.Profile)
+	overridden := false
+	if strings.TrimSpace(profileOverride) != "" {
+		profile = strings.TrimSpace(profileOverride)
+		overridden = true
+	}
 	if profile == "" {
 		profile = "standard"
 	}
 	cfg, knownProfile := ConfigForProfile(profile)
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
 		return EffectiveConfig{}, err
 	}
 	if cfg.SchemaVersion == 0 {
 		cfg.SchemaVersion = 1
 	}
-	if strings.TrimSpace(cfg.Profile) == "" {
+	if overridden || strings.TrimSpace(cfg.Profile) == "" {
 		cfg.Profile = profile
 	}
 
@@ -91,7 +116,7 @@ func Parse(data []byte) (EffectiveConfig, error) {
 	if !knownProfile {
 		warnings = append(warnings, "unknown profile name: "+profile)
 	}
-	return EffectiveConfig{Config: cfg, Warnings: warnings}, nil
+	return EffectiveConfig{Config: cfg, Warnings: warnings, ProfileOverriddenByCLI: overridden}, nil
 }
 
 func ResolveConfigPath(opts LoadOptions) (string, bool, error) {

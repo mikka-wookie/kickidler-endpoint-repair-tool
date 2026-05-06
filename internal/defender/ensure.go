@@ -51,6 +51,7 @@ func (w DefenderWorkflow) Run(ctx *app.AppContext) error {
 		Ensure:        w.Ensure,
 		AllKnownPaths: w.AllKnownPaths,
 		ReportDir:     ctx.OutputDir,
+		Policy:        ctx.ConfigPolicy(),
 	}
 	ctx.Logger.Info("defender command started")
 	ctx.Logger.Info("ensure mode: %t", w.Ensure)
@@ -140,6 +141,13 @@ func (w DefenderWorkflow) Run(ctx *app.AppContext) error {
 		if len(result.MissingBefore) > 0 {
 			ctx.ExitCode = ExitWarnings
 		}
+		return w.finish(ctx, result, nil)
+	}
+	if !result.Policy.DefenderAllowAddExclusion {
+		message := "Defender exclusion changes are disabled by policy"
+		ctx.ExitCode = ExitAddFailed
+		result.Errors = append(result.Errors, message)
+		addOperation(ctx, "defender_policy", "defender", app.OperationStatusFailed, message, message)
 		return w.finish(ctx, result, nil)
 	}
 	if len(result.MissingBefore) == 0 {

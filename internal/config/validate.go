@@ -35,6 +35,9 @@ func ValidateConfig(cfg Config) ValidationResult {
 	if !oneOf(cfg.Logging.Level, "debug", "info", "warning", "error") {
 		result.Errors = append(result.Errors, "logging.level must be one of debug, info, warning, error")
 	}
+	if !oneOf(cfg.Logging.Format, "jsonl", "text") {
+		result.Errors = append(result.Errors, "logging.format must be one of jsonl, text")
+	}
 	if !oneOf(cfg.Installer.SignaturePolicy, "warn", "fail", "skip") {
 		result.Errors = append(result.Errors, "installer.signature_policy must be one of warn, fail, skip")
 	}
@@ -50,6 +53,27 @@ func ValidateConfig(cfg Config) ValidationResult {
 	if cfg.Repair.ProcessKillTimeoutSeconds < 0 {
 		result.Errors = append(result.Errors, "repair.process_kill_timeout_seconds cannot be negative")
 	}
+	if cfg.Bundle.MaxSizeMB < 0 {
+		result.Errors = append(result.Errors, "bundle.max_size_mb cannot be negative")
+	}
+	if _, known := ConfigForProfile(strings.TrimSpace(cfg.Profile)); !known {
+		result.Errors = append(result.Errors, "unknown profile name: "+cfg.Profile)
+	}
+	if !cfg.Repair.RequireAdminForDestructive || !cfg.Safety.RequireAdminForDestructive {
+		result.Errors = append(result.Errors, "require_admin_for_destructive cannot be disabled")
+	}
+	if !cfg.Repair.RequireYesForNonInteractive || !cfg.Safety.RequireYesForNonInteractive {
+		result.Errors = append(result.Errors, "require_yes_for_non_interactive cannot be disabled")
+	}
+	if !cfg.Repair.RequireRollbackSnapshot || !cfg.Safety.RequireRollbackSnapshot {
+		result.Errors = append(result.Errors, "require_rollback_snapshot cannot be disabled")
+	}
+	if !cfg.Cleanup.RequireExactAllowlist || !cfg.Safety.RequireExactAllowlist {
+		result.Errors = append(result.Errors, "require_exact_allowlist cannot be disabled")
+	}
+	if !cfg.Cleanup.RequireRevalidationBeforeMutation || !cfg.Safety.RequireRevalidationBeforeMutation {
+		result.Errors = append(result.Errors, "require_revalidation_before_mutation cannot be disabled")
+	}
 
 	if !insideDefaultProgramData(cfg.Reports.Root) {
 		result.Warnings = append(result.Warnings, "reports.root is outside C:\\ProgramData\\kigrepair")
@@ -62,9 +86,6 @@ func ValidateConfig(cfg Config) ValidationResult {
 	}
 	if !cfg.Defender.EnsureBeforeInstall {
 		result.Warnings = append(result.Warnings, "defender.ensure_before_install is disabled")
-	}
-	if _, known := ConfigForProfile(strings.TrimSpace(cfg.Profile)); !known {
-		result.Warnings = append(result.Warnings, "unknown profile name: "+cfg.Profile)
 	}
 	for _, path := range cfg.Installer.LookupPaths {
 		expanded := ExpandPath(strings.TrimSpace(path))

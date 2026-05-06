@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"kigrepair/internal/app"
+	"kigrepair/internal/config"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/installer"
 	"kigrepair/internal/logging"
@@ -121,6 +122,11 @@ func Run(ctx *app.AppContext, opts Options, deps Dependencies) (Result, error) {
 
 	result.Classification = Classify(detection, detectErr)
 	result.Recommendation = Recommend(result, detection)
+	result.Policy = ctx.ConfigPolicy()
+	result.PolicyWarnings, result.BlockingPolicyChecks = policyReadiness(result.Policy, result, detection)
+	for _, blocker := range result.BlockingPolicyChecks {
+		addCheck(&result, CheckResult{Code: blocker, Required: true, Title: "Policy gate", Status: CheckFail, Description: blocker})
+	}
 	result.Status, result.ReadyForRepair = calculateStatus(result.Checks)
 	result.ExitCode = ExitCode(result.Status)
 	result.FailedRequiredChecks = failedRequiredChecks(result.Checks)
@@ -148,6 +154,30 @@ func Run(ctx *app.AppContext, opts Options, deps Dependencies) (Result, error) {
 	ctx.Logger.Info("preflight status: %s", result.Status)
 	ctx.Logger.Info("preflight exit code: %d", result.ExitCode)
 	return result, nil
+}
+
+func policyReadiness(policy config.PolicySummary, result Result, detection detector.DetectionReport) ([]string, []string) {
+	warnings := []string{"Active policy profile: " + policy.Profile}
+	blockers := []string{}
+	if policy.RequireRollbackSnapshot {
+		warnings = append(warnings, "rollback_required")
+	}
+	if policy.RequireInstallerValidation {
+		warnings = append(warnings, "installer_validation_required")
+	}
+	if !policy.AllowRealRepair {
+		blockers = append(blockers, "repair_disabled_by_policy")
+	}
+	if policy.StopOnDetectionUnknown && strings.EqualFold(string(detection.Health), string(detector.GrabberHealthUnknown)) {
+		blockers = append(blockers, "unknown_detection_blocks_repair")
+	}
+	if policy.Profile == "conservative" && policy.RequireDefenderBeforeInstall && policy.DefenderRequireCoverageForInstall && !result.Environment.DefenderReadable && len(detection.MissingDefenderPaths) > 0 && !policy.DefenderTreatUnavailableAsWarning {
+		blockers = append(blockers, "defender_required_but_unavailable")
+	}
+	if policy.Profile == "diagnostic" {
+		warnings = append(warnings, "diagnostic_profile_recommends_collect_report_before_repair")
+	}
+	return warnings, blockers
 }
 
 func fillDependencies(deps Dependencies) Dependencies {

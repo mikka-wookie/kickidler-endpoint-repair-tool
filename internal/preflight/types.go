@@ -3,6 +3,7 @@ package preflight
 import (
 	"time"
 
+	"kigrepair/internal/config"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/version"
 )
@@ -47,6 +48,9 @@ type Result struct {
 	FailedRequiredChecks []string             `json:"failed_required_checks,omitempty"`
 	Classification       ClassificationResult `json:"classification,omitempty"`
 	Recommendation       RecommendationResult `json:"recommendation,omitempty"`
+	Policy               config.PolicySummary `json:"policy"`
+	PolicyWarnings       []string             `json:"policy_warnings,omitempty"`
+	BlockingPolicyChecks []string             `json:"blocking_policy_checks,omitempty"`
 }
 
 type CheckResult struct {

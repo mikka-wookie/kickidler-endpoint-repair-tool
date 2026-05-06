@@ -15,6 +15,7 @@ func (w RepairWorkflow) runDefenderEnsure(ctx *app.AppContext, detect func() det
 		StartedAt: time.Now(),
 		Ensure:    true,
 		ReportDir: ctx.OutputDir,
+		Policy:    ctx.ConfigPolicy(),
 	}
 	if !shouldRun {
 		addOperation(ctx, "defender_ensure", "defender", app.OperationStatusSkipped, "Defender ensure was not required", "")
@@ -55,6 +56,14 @@ func (w RepairWorkflow) runDefenderEnsure(ctx *app.AppContext, detect func() det
 		addOperation(ctx, "defender_ensure", "defender", app.OperationStatusSuccess, "All required Defender exclusions are already present", "")
 		result.FinishedAt = time.Now()
 		result.ExitCode = defender.ExitOK
+		return result, true
+	}
+	if !result.Policy.DefenderAllowAddExclusion {
+		message := "Defender exclusion changes are disabled by policy"
+		result.Errors = append(result.Errors, message)
+		addOperation(ctx, "defender_ensure", "defender", app.OperationStatusFailed, message, message)
+		result.FinishedAt = time.Now()
+		result.ExitCode = defender.ExitAddFailed
 		return result, true
 	}
 

@@ -9,6 +9,7 @@ import (
 
 	"kigrepair/internal/app"
 	"kigrepair/internal/cleaner"
+	"kigrepair/internal/config"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/installer"
 )
@@ -166,6 +167,33 @@ func TestRepairDryRunPlansWithoutMutating(t *testing.T) {
 	}
 }
 
+func TestRepairDryRunIncludesPolicyMetadata(t *testing.T) {
+	ctx := newTestContext(t)
+	cfg, _ := config.ConfigForProfile("diagnostic")
+	ctx.Config = cfg
+	msi := tempMSI(t)
+	plan, _, err := DryRunWorkflow{
+		Invite:           "SECRET-INVITE",
+		IsAdmin:          func() bool { return true },
+		Detect:           func() detector.DetectionReport { return healthyReport(nil) },
+		BuildCleanupPlan: emptyCleanupPlan,
+		InstallerResolver: func(string) (installer.InstallerResolution, error) {
+			return testInstallerResolution(msi), nil
+		},
+		PowerShellCheck: func() (bool, error) { return true, nil },
+		MSIExecCheck:    func() (bool, error) { return true, nil },
+	}.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Policy.Profile != "diagnostic" {
+		t.Fatalf("policy profile = %q", plan.Policy.Profile)
+	}
+	if !containsText(plan.PolicyDecisions, "Diagnostic profile recommends collect-report") {
+		t.Fatalf("policy decisions missing diagnostic recommendation: %#v", plan.PolicyDecisions)
+	}
+}
+
 func TestRepairDryRunRunWritesPlanOnlyArtifactsAndNoRawInvite(t *testing.T) {
 	ctx := newTestContext(t)
 	secret := "SECRET-INVITE-999"
@@ -277,6 +305,15 @@ func emptyCleanupPlan(detector.DetectionReport) cleaner.CleanupPlan {
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsText(values []string, part string) bool {
+	for _, value := range values {
+		if strings.Contains(value, part) {
 			return true
 		}
 	}

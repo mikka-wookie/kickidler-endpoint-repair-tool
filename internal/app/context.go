@@ -113,6 +113,19 @@ func (c *AppContext) FinishRun() {
 	c.Run.DurationMS = c.Run.FinishedAt.Sub(c.Run.StartedAt).Milliseconds()
 }
 
+func (c *AppContext) ConfigPolicy() config.PolicySummary {
+	cfg := c.Config
+	if cfg.SchemaVersion == 0 && strings.TrimSpace(cfg.Profile) == "" {
+		cfg = config.DefaultConfig()
+	}
+	return config.EffectiveConfig{
+		Config:                 cfg,
+		Path:                   c.ConfigMeta.Path,
+		Warnings:               c.ConfigMeta.Warnings,
+		ProfileOverriddenByCLI: c.ConfigMeta.Policy.Source.ProfileOverriddenByCLI,
+	}.PolicySummary()
+}
+
 func (c *AppContext) nextOperationID(step string) string {
 	c.operationSeq++
 	return fmt.Sprintf("op-%03d-%s", c.operationSeq, Slug(shortStep(step)))

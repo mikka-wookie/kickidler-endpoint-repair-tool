@@ -33,6 +33,7 @@ import (
 type globalOptions struct {
 	output         string
 	configPath     string
+	profile        string
 	quiet          bool
 	nonInteractive bool
 	force          bool
@@ -63,6 +64,7 @@ func main() {
 
 	rootCmd.PersistentFlags().StringVar(&opts.output, "output", "", "report output directory or report root")
 	rootCmd.PersistentFlags().StringVar(&opts.configPath, "config", "", "path to kigrepair YAML config")
+	rootCmd.PersistentFlags().StringVar(&opts.profile, "profile", "", "policy profile: standard, conservative, or diagnostic")
 	rootCmd.PersistentFlags().BoolVar(&opts.quiet, "quiet", false, "suppress console output")
 	rootCmd.PersistentFlags().BoolVar(&opts.nonInteractive, "non-interactive", false, "disable interactive prompts")
 	rootCmd.PersistentFlags().BoolVar(&opts.force, "force", false, "allow future privileged workflows to bypass confirmations")
@@ -247,6 +249,9 @@ func collectReportCommand(opts *globalOptions) *cobra.Command {
 			}
 			if !cmd.Flags().Changed("include-history") {
 				includeHistory = effective.Config.Bundle.IncludeMSILogs
+			}
+			if effective.Config.Profile == "diagnostic" && !cmd.Flags().Changed("history-limit") {
+				historyLimit = 10
 			}
 			return runWorkflow(opts, diagnostics.CollectReportWorkflow{
 				IncludeEventLogs: includeEventLogs,
@@ -571,6 +576,7 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	if err := ctx.Reporter.WriteJSON("config-metadata", ctx.ConfigMeta); err != nil {
 		return err
 	}
+	ctx.AddResult(app.OperationResult{Step: "policy.profile", Target: ctx.Config.Profile, Status: app.OperationStatusSuccess, Message: "Active policy profile: " + ctx.Config.Profile, Timestamp: time.Now()})
 
 	suppressConsoleLog := ctx.Quiet || ctx.JSONOutput || workflow.Name() == "verify" || workflow.Name() == "preflight"
 	logLevel := effective.Config.Logging.Level
@@ -648,6 +654,7 @@ func runReportWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	if err := ctx.Reporter.WriteJSON("config-metadata", ctx.ConfigMeta); err != nil {
 		return err
 	}
+	ctx.AddResult(app.OperationResult{Step: "policy.profile", Target: ctx.Config.Profile, Status: app.OperationStatusSuccess, Message: "Active policy profile: " + ctx.Config.Profile, Timestamp: time.Now()})
 
 	suppressConsoleLog := ctx.Quiet || ctx.JSONOutput
 	logLevel := effective.Config.Logging.Level
@@ -708,7 +715,7 @@ func reportRootFromEffectiveOptions(opts *globalOptions, effective config.Effect
 }
 
 func loadEffectiveConfig(opts *globalOptions) (config.EffectiveConfig, error) {
-	effective, err := config.Load(config.LoadOptions{ExplicitPath: opts.configPath})
+	effective, err := config.Load(config.LoadOptions{ExplicitPath: opts.configPath, ProfileOverride: opts.profile})
 	if err != nil {
 		return config.EffectiveConfig{}, err
 	}

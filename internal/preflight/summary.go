@@ -12,6 +12,7 @@ func FormatSummary(result Result) string {
 	b.WriteString("Preflight\n")
 	b.WriteString("---------\n")
 	b.WriteString("Status: " + result.Status + "\n")
+	b.WriteString("Active profile: " + valueOrDash(result.Policy.Profile) + "\n")
 	b.WriteString("Ready for repair: " + yesNo(result.ReadyForRepair) + "\n")
 	b.WriteString("Report directory: " + valueOrDash(result.ReportDir) + "\n")
 	if result.Installer.Path != "" {

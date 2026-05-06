@@ -127,17 +127,31 @@ func cleanupSummaryActions(results []app.OperationResult, plan CleanupPlan) []st
 }
 
 func writePlannedActions(b *strings.Builder, plan CleanupPlan) {
+	if plan.Policy != nil {
+		b.WriteString("Active profile: " + valueOrDash(plan.Policy.Profile) + "\n\n")
+	}
 	if len(plan.Actions) == 0 {
 		b.WriteString("Planned actions:\n- No cleanup actions were required.\n\n")
-		return
+	} else {
+		b.WriteString(processPlanSummary(plan))
+		b.WriteString("\n")
+		b.WriteString("Planned actions:\n")
+		for _, action := range plan.Actions {
+			b.WriteString("- " + displayActionPhrase(action.Type) + ": " + action.Target + "\n")
+		}
+		b.WriteString("\n")
 	}
-	b.WriteString(processPlanSummary(plan))
-	b.WriteString("\n")
-	b.WriteString("Planned actions:\n")
-	for _, action := range plan.Actions {
-		b.WriteString("- " + displayActionPhrase(action.Type) + ": " + action.Target + "\n")
+	if len(plan.Skipped) > 0 {
+		b.WriteString("Skipped by policy:\n")
+		for _, action := range plan.Skipped {
+			b.WriteString("- " + displayActionPhrase(action.Type) + ": " + action.Target)
+			if action.Error != "" {
+				b.WriteString(" (" + action.Error + ")")
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
 	}
-	b.WriteString("\n")
 	if len(plan.Warnings) > 0 {
 		b.WriteString("Warnings:\n")
 		for _, warning := range plan.Warnings {

@@ -35,15 +35,18 @@ type CleanupAction struct {
 	MatchReason    string            `json:"match_reason,omitempty"`
 	ServiceTrust   string            `json:"service_trust,omitempty"`
 	ServiceState   string            `json:"service_state,omitempty"`
+	PolicyStatus   string            `json:"policy_status,omitempty"`
 	Error          string            `json:"error,omitempty"`
 }
 
 type CleanupPlan struct {
-	GeneratedAt time.Time       `json:"generated_at"`
-	DryRun      bool            `json:"dry_run"`
-	Actions     []CleanupAction `json:"actions"`
-	Warnings    []string        `json:"warnings"`
-	Blockers    []string        `json:"blockers"`
+	GeneratedAt time.Time             `json:"generated_at"`
+	DryRun      bool                  `json:"dry_run"`
+	Policy      *config.PolicySummary `json:"policy,omitempty"`
+	Actions     []CleanupAction       `json:"actions"`
+	Skipped     []CleanupAction       `json:"skipped,omitempty"`
+	Warnings    []string              `json:"warnings"`
+	Blockers    []string              `json:"blockers"`
 }
 
 type PlanOptions struct {
@@ -52,6 +55,7 @@ type PlanOptions struct {
 	PathExists   func(string) (bool, error)
 	ValidatePath func(string) error
 	Now          func() time.Time
+	Policy       *config.PolicySummary
 }
 
 func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
@@ -71,19 +75,23 @@ func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
 	plan := CleanupPlan{
 		GeneratedAt: opts.Now(),
 		DryRun:      opts.DryRun,
+		Policy:      opts.Policy,
 		Actions:     make([]CleanupAction, 0),
+		Skipped:     make([]CleanupAction, 0),
 		Warnings:    make([]string, 0),
 		Blockers:    make([]string, 0),
 	}
 
 	if anyMSIRegistryKeyExists(report.Registry) {
-		plan.Actions = append(plan.Actions, CleanupAction{
-			Type:     CleanupActionMSIUninstall,
-			Target:   config.MSIProductCode,
-			Reason:   "MSI product or installer registry keys detected",
-			Safe:     true,
-			WouldRun: opts.DryRun,
-		})
+		action := CleanupAction{
+			Type:         CleanupActionMSIUninstall,
+			Target:       config.MSIProductCode,
+			Reason:       "MSI product or installer registry keys detected",
+			Safe:         true,
+			WouldRun:     opts.DryRun,
+			PolicyStatus: "allowed",
+		}
+		appendPolicyAction(&plan, action, opts.Policy)
 	}
 
 	for _, service := range report.Services {
@@ -94,7 +102,7 @@ func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
 			plan.Warnings = append(plan.Warnings, fmt.Sprintf("Service %s will not be modified automatically because trust level is %s", service.Name, valueOrUnknown(service.TrustLevel)))
 			continue
 		}
-		plan.Actions = append(plan.Actions,
+		appendPolicyAction(&plan,
 			CleanupAction{
 				Type:           CleanupActionStopService,
 				Target:         service.Name,
@@ -104,7 +112,9 @@ func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
 				ExecutablePath: service.NormalizedExecutablePath,
 				ServiceTrust:   service.TrustLevel,
 				ServiceState:   service.Status,
-			},
+				PolicyStatus:   "allowed",
+			}, opts.Policy)
+		appendPolicyAction(&plan,
 			CleanupAction{
 				Type:           CleanupActionDeleteService,
 				Target:         service.Name,
@@ -114,8 +124,8 @@ func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
 				ExecutablePath: service.NormalizedExecutablePath,
 				ServiceTrust:   service.TrustLevel,
 				ServiceState:   service.Status,
-			},
-		)
+				PolicyStatus:   "allowed",
+			}, opts.Policy)
 	}
 
 	for _, process := range report.Processes {
@@ -125,7 +135,7 @@ func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
 			}
 			continue
 		}
-		plan.Actions = append(plan.Actions, CleanupAction{
+		appendPolicyAction(&plan, CleanupAction{
 			Type:           CleanupActionKillProcess,
 			Target:         detector.ProcessTarget(process),
 			Reason:         "Trusted Grabber process detected: " + process.MatchReason,
@@ -136,7 +146,8 @@ func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
 			ExecutablePath: process.ExecutablePath,
 			TrustLevel:     process.TrustLevel,
 			MatchReason:    process.MatchReason,
-		})
+			PolicyStatus:   "allowed",
+		}, opts.Policy)
 	}
 
 	for _, configuredPath := range opts.CleanupPaths {
@@ -153,29 +164,77 @@ func BuildPlan(report detector.DetectionReport, opts PlanOptions) CleanupPlan {
 			plan.Blockers = append(plan.Blockers, fmt.Sprintf("Refused unsafe cleanup path: %s (%s)", expandedPath, err))
 			continue
 		}
-		plan.Actions = append(plan.Actions, CleanupAction{
-			Type:     CleanupActionDeletePath,
-			Target:   detector.NormalizeWindowsPath(expandedPath),
-			Reason:   "Known Grabber cleanup path exists",
-			Safe:     true,
-			WouldRun: opts.DryRun,
-		})
+		appendPolicyAction(&plan, CleanupAction{
+			Type:         CleanupActionDeletePath,
+			Target:       detector.NormalizeWindowsPath(expandedPath),
+			Reason:       "Known Grabber cleanup path exists",
+			Safe:         true,
+			WouldRun:     opts.DryRun,
+			PolicyStatus: "allowed",
+		}, opts.Policy)
 	}
 
 	for _, key := range report.Registry {
 		if !key.Exists {
 			continue
 		}
-		plan.Actions = append(plan.Actions, CleanupAction{
-			Type:     CleanupActionDeleteRegistryKey,
-			Target:   registryTarget(key),
-			Reason:   "Known Grabber registry key detected",
-			Safe:     true,
-			WouldRun: opts.DryRun,
-		})
+		appendPolicyAction(&plan, CleanupAction{
+			Type:         CleanupActionDeleteRegistryKey,
+			Target:       registryTarget(key),
+			Reason:       "Known Grabber registry key detected",
+			Safe:         true,
+			WouldRun:     opts.DryRun,
+			PolicyStatus: "allowed",
+		}, opts.Policy)
 	}
 
 	return plan
+}
+
+func appendPolicyAction(plan *CleanupPlan, action CleanupAction, policy *config.PolicySummary) {
+	if policy == nil {
+		plan.Actions = append(plan.Actions, action)
+		return
+	}
+	blocked := ""
+	switch action.Type {
+	case CleanupActionMSIUninstall:
+		if !policy.AllowMSIUninstall {
+			blocked = "MSI uninstall disabled by policy"
+		}
+	case CleanupActionStopService, CleanupActionDeleteService:
+		if !policy.AllowServiceDelete {
+			blocked = "service mutation disabled by policy"
+		}
+	case CleanupActionKillProcess:
+		if !policy.AllowProcessTerminate {
+			blocked = "process termination disabled by policy"
+		}
+	case CleanupActionDeletePath:
+		if !policy.AllowFileDelete {
+			blocked = "file deletion disabled by policy"
+		} else if isHiddenWMIPath(action.Target) && !policy.AllowHiddenWMICleanup {
+			blocked = "hidden WMI cleanup disabled by policy"
+		}
+	case CleanupActionDeleteRegistryKey:
+		if !policy.AllowRegistryDelete {
+			blocked = "registry deletion disabled by policy"
+		}
+	}
+	if blocked != "" {
+		action.PolicyStatus = "skipped_by_policy"
+		action.Error = blocked
+		plan.Skipped = append(plan.Skipped, action)
+		plan.Warnings = append(plan.Warnings, blocked+": "+action.Target)
+		return
+	}
+	action.PolicyStatus = "allowed"
+	plan.Actions = append(plan.Actions, action)
+}
+
+func isHiddenWMIPath(path string) bool {
+	normalized := strings.ToLower(detector.NormalizeWindowsPath(path))
+	return strings.Contains(normalized, `\windows\system32\wmi`)
 }
 
 func valueOrUnknown(value string) string {
