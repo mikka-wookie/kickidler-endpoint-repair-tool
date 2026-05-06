@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"kigrepair/internal/config"
+	"kigrepair/internal/safety"
 	"kigrepair/internal/version"
 )
 
@@ -71,6 +72,7 @@ func NewContext() *AppContext {
 }
 
 func (c *AppContext) AddResult(result OperationResult) {
+	result = RedactOperationResult(result)
 	if result.Timestamp.IsZero() {
 		result.Timestamp = time.Now()
 	}
@@ -106,6 +108,22 @@ func (c *AppContext) AddResult(result OperationResult) {
 	c.Results = append(c.Results, result)
 	c.emitProgress(result, "operation_started")
 	c.emitProgress(result, "operation_finished")
+}
+
+func RedactOperationResult(result OperationResult) OperationResult {
+	result.Step = safety.RedactString(result.Step)
+	result.Target = safety.RedactString(result.Target)
+	result.Message = safety.RedactString(result.Message)
+	result.Details = safety.RedactString(result.Details)
+	result.FailureCategory = safety.RedactString(result.FailureCategory)
+	result.Error = safety.RedactString(result.Error)
+	result.Artifact = safety.RedactString(result.Artifact)
+	result.RedactedCommand = safety.RedactString(result.RedactedCommand)
+	result.ResultFile = safety.RedactString(result.ResultFile)
+	for i := range result.RelatedFiles {
+		result.RelatedFiles[i] = safety.RedactString(result.RelatedFiles[i])
+	}
+	return result
 }
 
 func (c *AppContext) FinishRun() {
@@ -148,7 +166,14 @@ func (c *AppContext) emitProgress(result OperationResult, stage string) {
 		ResultFile:      result.ResultFile,
 		FailureCategory: result.FailureCategory,
 	}
-	c.Progress.OnProgress(event)
+	c.EmitProgress(event)
+}
+
+func (c *AppContext) EmitProgress(event ProgressEvent) {
+	if c == nil || c.Progress == nil {
+		return
+	}
+	c.Progress.OnProgress(RedactProgressEvent(event))
 }
 
 func shortStep(step string) string {

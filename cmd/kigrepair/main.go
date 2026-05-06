@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"kigrepair/internal/app"
+	"kigrepair/internal/app/workflowservice"
 	"kigrepair/internal/checks"
 	"kigrepair/internal/cleaner"
 	"kigrepair/internal/config"
@@ -538,85 +540,70 @@ func versionCommand(opts *globalOptions) *cobra.Command {
 }
 
 func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
-	effective, err := loadEffectiveConfig(opts)
+	service := workflowservice.NewDefault()
+	response, err := service.ExecuteWorkflow(cmdContext(), app.CommonRequest{
+		ConfigPath:     opts.configPath,
+		Profile:        opts.profile,
+		OutputDir:      opts.output,
+		JSONOutput:     opts.jsonOutput,
+		Quiet:          opts.quiet,
+		NonInteractive: opts.nonInteractive,
+		Force:          opts.force,
+		LogLevel:       opts.logLevel,
+		DryRun:         workflowDryRun(workflow),
+	}, workflow, primaryResultFile(workflow))
 	if err != nil {
 		return err
 	}
-	ctx := app.NewContext()
-	ctx.StartedAt = time.Now()
-	ctx.Run.StartedAt = ctx.StartedAt
-	ctx.Config = effective.Config
-	ctx.ConfigMeta = effective.Metadata()
-	ctx.ReportRoot = reportRootFromEffectiveOptions(opts, effective)
-	ctx.Quiet = opts.quiet
-	ctx.NonInteractive = opts.nonInteractive
-	ctx.Force = opts.force
-	ctx.JSONOutput = opts.jsonOutput
-	ctx.Run.CommandName = workflow.Name()
-	ctx.Run.WorkflowName = workflow.Name()
-	ctx.Run.ReportDir = ctx.OutputDir
-	ctx.Run.DryRun = workflowDryRun(workflow)
-	ctx.Run.ReadOnly = workflowReadOnly(workflow)
-	if opts.quiet {
-		ctx.Mode = app.RunModeQuiet
-	}
-	if opts.output != "" {
-		ctx.OutputDir = opts.output
-	} else {
-		ctx.OutputDir = reports.TimestampedDir(ctx.ReportRoot, ctx.StartedAt)
-	}
 
-	reporter, err := reports.New(ctx.OutputDir)
-	if err != nil {
-		return err
-	}
-	reporter.Run = &ctx.Run
-	reporter.Results = &ctx.Results
-	ctx.Reporter = reporter
-	if err := ctx.Reporter.WriteJSON("config-metadata", ctx.ConfigMeta); err != nil {
-		return err
-	}
-	ctx.AddResult(app.OperationResult{Step: "policy.profile", Target: ctx.Config.Profile, Status: app.OperationStatusSuccess, Message: "Active policy profile: " + ctx.Config.Profile, Timestamp: time.Now()})
-
-	suppressConsoleLog := ctx.Quiet || ctx.JSONOutput || workflow.Name() == "verify" || workflow.Name() == "preflight"
-	logLevel := effective.Config.Logging.Level
-	if strings.TrimSpace(opts.logLevel) != "" {
-		logLevel = opts.logLevel
-	}
-	logger, err := logging.NewWithOptions(reports.LogPath(ctx.OutputDir), logging.Options{
-		Quiet:    suppressConsoleLog,
-		Level:    logLevel,
-		RunID:    ctx.Run.RunID,
-		Workflow: ctx.Run.WorkflowName,
-	})
-	if err != nil {
-		return err
-	}
-	defer logger.Close()
-	ctx.Logger = logger
-
-	if err := app.RunWorkflow(ctx, workflow); err != nil {
-		return err
-	}
-
-	if ctx.JSONOutput {
-		value := any(ctx.Results)
-		if ctx.JSONValue != nil {
-			value = ctx.JSONValue
-		}
+	if opts.jsonOutput {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		encoder.SetEscapeHTML(false)
-		if err := encoder.Encode(value); err != nil {
+		if err := encoder.Encode(response.Result); err != nil {
 			return err
 		}
-	} else if !ctx.Quiet && workflow.Name() != "verify" && workflow.Name() != "repair --dry-run" && workflow.Name() != "preflight" {
-		fmt.Printf("Report directory: %s\n", ctx.OutputDir)
+	} else if !opts.quiet && workflow.Name() != "verify" && workflow.Name() != "repair --dry-run" && workflow.Name() != "preflight" {
+		fmt.Printf("Report directory: %s\n", response.Meta.ReportDir)
 	}
-	if ctx.ExitCode != 0 {
-		return app.ExitError{Code: ctx.ExitCode}
+	if response.Meta.ExitCode != 0 {
+		return app.ExitError{Code: response.Meta.ExitCode}
 	}
 	return nil
+}
+
+func cmdContext() context.Context {
+	return context.Background()
+}
+
+func primaryResultFile(workflow app.Workflow) string {
+	switch workflow.Name() {
+	case "check":
+		return "initial-detection.json"
+	case "verify":
+		return "verification-result.json"
+	case "preflight":
+		return "preflight-result.json"
+	case "repair --dry-run":
+		return "repair-plan.json"
+	case "repair":
+		return "repair-result.json"
+	case "cleanup":
+		if workflowDryRun(workflow) {
+			return "cleanup-plan.json"
+		}
+		return "cleanup-result.json"
+	case "install":
+		return "install-result.json"
+	case "defender":
+		return "defender-result.json"
+	case "collect-report":
+		return "collect-result.json"
+	case "wizard":
+		return "wizard-result.json"
+	default:
+		return ""
+	}
 }
 
 func runReportWorkflow(opts *globalOptions, workflow app.Workflow) error {
