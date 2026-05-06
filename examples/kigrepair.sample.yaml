@@ -17,16 +17,27 @@ installer:
     - grabber.msi
   require_validation: true
   signature_policy: warn
+  require_supported_filename: true
+  require_msi_extension: true
+  require_product_code_match: true
+  allow_metadata_unavailable: true
+  allow_signature_unavailable: true
 
 logging:
   level: info
   console: true
   include_debug: false
+  format: jsonl
 
 defender:
   ensure_before_install: true
   missing_policy: fail_before_install
   query_timeout_seconds: 30
+  ensure_enabled: true
+  require_coverage_for_install: true
+  allow_add_exclusion: true
+  treat_policy_managed_as_blocking: true
+  treat_unavailable_as_warning: false
 
 repair:
   require_preflight: true
@@ -34,13 +45,50 @@ repair:
   stop_on_defender_ensure_failure: true
   service_stop_timeout_seconds: 30
   process_kill_timeout_seconds: 10
+  require_admin_for_destructive: true
+  require_yes_for_non_interactive: true
+  require_installer_validation: true
+  require_preflight_ready: true
+  require_defender_before_install: true
+  allow_real_repair: true
+  allow_msi_uninstall: true
+  allow_service_delete: true
+  allow_process_terminate: true
+  stop_on_defender_failure: true
+  stop_on_detection_unknown: false
+
+cleanup:
+  allow_file_delete: true
+  allow_registry_delete: true
+  allow_service_delete: true
+  allow_process_terminate: true
+  allow_hidden_wmi_cleanup: true
+  require_exact_allowlist: true
+  require_revalidation_before_mutation: true
+  skip_ambiguous_targets: true
 
 bundle:
   redaction_enabled: true
   include_system: true
   include_msi_logs: true
+  include_reports: true
+  include_system_diagnostics: true
+  include_registry_snapshot: true
+  include_defender_snapshot: true
+  include_process_snapshot: true
+  include_service_snapshot: true
+  max_size_mb: 50
 
 wizard:
   collect_bundle_on_failure: true
   offer_repair: true
   verify_after_repair: true
+  allow_real_repair_prompt: true
+  require_exact_yes: true
+
+safety:
+  require_admin_for_destructive: true
+  require_yes_for_non_interactive: true
+  require_rollback_snapshot: true
+  require_exact_allowlist: true
+  require_revalidation_before_mutation: true

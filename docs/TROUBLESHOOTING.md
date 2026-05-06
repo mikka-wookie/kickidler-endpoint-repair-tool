@@ -5,9 +5,19 @@ For configuration problems, start with:
 ```powershell
 .\kigrepair.exe config validate --config ".\kigrepair.yaml"
 .\kigrepair.exe config show --config ".\kigrepair.yaml"
+.\kigrepair.exe config show --profile conservative
 ```
 
 Config files must not contain `invite`, tokens, passwords, authorization headers, or secrets.
+
+Use `--profile conservative` when the endpoint has unclear ownership, suspicious hidden WMI leftovers, unknown detection, or policy-managed Defender. Use `--profile diagnostic` when the safest next step is richer read-only evidence:
+
+```powershell
+.\kigrepair.exe repair --dry-run --profile conservative --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
+.\kigrepair.exe collect-report --profile diagnostic
+```
+
+If a command reports `repair_disabled_by_policy`, `defender_required_but_unavailable`, `unknown_detection_blocks_repair`, or `hidden WMI cleanup disabled by policy`, review `config-metadata.json`, `preflight-result.json`, `repair-plan.json`, and `cleanup-plan.json` before choosing a less restrictive run.
 
 Reports are written under `C:\ProgramData\kigrepair\Reports\<timestamp>\`. Attach `kigrepair-support-bundle.zip` when escalating.
 

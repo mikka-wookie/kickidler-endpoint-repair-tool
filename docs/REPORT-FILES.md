@@ -34,6 +34,8 @@ Each workflow run gets a `Run ID` such as `kigrun-20260506-120000-a1b2c3`. Use i
 
 `repair.log` is JSON Lines. Each line is a redacted structured event with timestamp, level, run ID, workflow, optional operation ID, event name, status, category, duration, and extra fields.
 
+Policy metadata appears in `config-metadata.json` and compactly in policy-aware results such as `preflight-result.json`, `repair-plan.json`, `repair-result.json`, `cleanup-plan.json`, `cleanup-result.json`, `defender-result.json`, `operations.json`, and `summary.txt`. Use it to confirm the active profile, CLI profile override, and safety gates such as rollback, Defender coverage, hidden WMI cleanup, and detection-unknown blocking.
+
 ## File Reference
 
 | File | Purpose | Produced by | How support should read it | Warnings/errors | Included in bundle |

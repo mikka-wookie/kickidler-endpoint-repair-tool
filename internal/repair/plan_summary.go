@@ -49,6 +49,7 @@ func FormatDryRunSummary(plan RepairPlan, initial *detector.DetectionReport) str
 	b.WriteString("Repair Dry-Run Plan\n")
 	b.WriteString("-------------------\n")
 	b.WriteString("Status: " + plan.Status + "\n")
+	b.WriteString("Active profile: " + valueOrDash(plan.Policy.Profile) + "\n")
 	b.WriteString("Ready for repair: " + yesNo(plan.ReadyForRepair) + "\n")
 	b.WriteString("Dry-run only: yes\n")
 	b.WriteString("System changes made: no\n")
@@ -91,6 +92,16 @@ func FormatDryRunSummary(plan RepairPlan, initial *detector.DetectionReport) str
 	b.WriteString("Verification:\n")
 	b.WriteString("- Would run after repair: yes\n")
 	b.WriteString("- Checks: " + strings.Join(plan.Verification.Checks, ", ") + "\n\n")
+	if len(plan.PolicyDecisions) > 0 || len(plan.BlockedByPolicy) > 0 {
+		b.WriteString("Policy decisions:\n")
+		for _, decision := range plan.PolicyDecisions {
+			b.WriteString("- " + decision + "\n")
+		}
+		for _, blocker := range plan.BlockedByPolicy {
+			b.WriteString("- blocked: " + blocker + "\n")
+		}
+		b.WriteString("\n")
+	}
 	if plan.Classification.PrimaryIssue != nil {
 		b.WriteString("Classification:\n")
 		b.WriteString("- Primary issue: " + plan.Classification.PrimaryIssue.Code + "\n\n")

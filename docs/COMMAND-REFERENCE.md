@@ -13,6 +13,7 @@ Failure handling: read-only commands should continue with warnings when service,
 Global observability flags:
 
 - `--log-level debug|info|warning|error`: controls `repair.log` event level. Default is `info`.
+- `--profile standard|conservative|diagnostic`: selects the repair strategy profile for this run and overrides YAML `profile:`.
 
 Workflow reports include a Run ID, operation IDs, a support-readable timeline in `summary.txt`, structured operation records in `operations.json`, and redacted JSONL events in `repair.log`.
 
@@ -75,6 +76,7 @@ Examples:
 .\kigrepair.exe config sample
 .\kigrepair.exe config validate --config ".\kigrepair.yaml"
 .\kigrepair.exe config show --config ".\kigrepair.yaml" --json
+.\kigrepair.exe config show --profile conservative
 ```
 
 Expected exit codes: `0` success, `4` invalid config, `10` unexpected error.
@@ -95,6 +97,7 @@ Example:
 
 ```powershell
 .\kigrepair.exe check
+.\kigrepair.exe check --profile conservative
 ```
 
 Expected exit codes: `0` healthy, `1` warning or not installed depending workflow result, `7` failed validation, `10` unexpected error.
@@ -115,6 +118,7 @@ Example:
 
 ```powershell
 .\kigrepair.exe verify
+.\kigrepair.exe verify --profile diagnostic
 ```
 
 Expected exit codes: `0` passed, `1` warning, `7` failed verification, `10` unexpected error.
@@ -135,6 +139,7 @@ Example:
 
 ```powershell
 .\kigrepair.exe preflight --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
+.\kigrepair.exe preflight --profile conservative --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
 ```
 
 Expected exit codes: `0` ready, `1` ready with warnings, `7` not ready, `10` unexpected error.
@@ -255,6 +260,7 @@ Example:
 
 ```powershell
 .\kigrepair.exe repair --dry-run --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
+.\kigrepair.exe repair --dry-run --profile conservative --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
 ```
 
 Expected exit codes: `0` planned, `1` planned with warnings, `7` not ready, `10` unexpected error.
@@ -295,6 +301,7 @@ Example:
 
 ```powershell
 .\kigrepair.exe collect-report
+.\kigrepair.exe collect-report --profile diagnostic
 ```
 
 Expected exit codes: `0` success, `1` warnings or partial collection, `10` unexpected error.

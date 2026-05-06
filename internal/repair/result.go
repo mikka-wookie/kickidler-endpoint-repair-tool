@@ -5,6 +5,7 @@ import (
 
 	"kigrepair/internal/app"
 	"kigrepair/internal/classifier"
+	"kigrepair/internal/config"
 	"kigrepair/internal/installer"
 	"kigrepair/internal/recommendations"
 	"kigrepair/internal/rollback"
@@ -55,4 +56,7 @@ type RepairResult struct {
 	Errors              []string                              `json:"errors"`
 	ExitCode            int                                   `json:"exit_code"`
 	ReportDir           string                                `json:"report_dir"`
+	Policy              config.PolicySummary                  `json:"policy"`
+	PolicyDecisions     []string                              `json:"policy_decisions,omitempty"`
+	BlockedByPolicy     []string                              `json:"blocked_by_policy,omitempty"`
 }

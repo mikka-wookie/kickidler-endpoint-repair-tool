@@ -11,6 +11,7 @@ import (
 	"kigrepair/internal/checks"
 	"kigrepair/internal/classifier"
 	"kigrepair/internal/cleaner"
+	"kigrepair/internal/config"
 	"kigrepair/internal/defender"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/installer"
@@ -142,7 +143,8 @@ func (w DryRunWorkflow) Build(ctx *app.AppContext) (RepairPlan, repairPlanArtifa
 	})
 	addOperation(ctx, "recommendation", "grabber", app.OperationStatusSuccess, "Recommendation plan generated", "")
 
-	cleanupPlan := w.buildCleanupPlan(initial)
+	policy := ctx.ConfigPolicy()
+	cleanupPlan := w.buildCleanupPlan(initial, &policy)
 	cleanupPlan.Actions = cleaner.SortActionsForExecution(cleanupPlan.Actions)
 	addPlanOperations(ctx, cleanupPlan)
 	decision := Decide(initial, ctx.Force, len(cleanupPlan.Actions))
@@ -180,7 +182,9 @@ func (w DryRunWorkflow) Build(ctx *app.AppContext) (RepairPlan, repairPlanArtifa
 		ExpectedOutputs: expectedRepairOutputs(cleanupPlan),
 		DryRunOutputs:   dryRunOutputs(),
 		NextCommand:     NextRepairCommand(installerPlan.InstallerPath, !installerPlan.InstallerFound),
+		Policy:          policy,
 	}
+	plan.PolicyDecisions, plan.BlockedByPolicy = PolicyDecisions(policy, initial, preflight, defenderPlan, cleanupPlan)
 	plan.RequiredInputs = requiredInputs(preflight)
 	plan.Warnings = append(plan.Warnings, preflight.Warnings...)
 	plan.Warnings = append(plan.Warnings, cleanupPlan.Warnings...)
@@ -188,7 +192,8 @@ func (w DryRunWorkflow) Build(ctx *app.AppContext) (RepairPlan, repairPlanArtifa
 	plan.Warnings = append(plan.Warnings, installerPlan.Warnings...)
 	plan.Errors = append(plan.Errors, preflight.Errors...)
 	plan.Errors = append(plan.Errors, cleanupPlan.Blockers...)
-	if len(plan.RequiredInputs) > 0 || preflight.HasFailedRequiredCheck() || len(cleanupPlan.Blockers) > 0 {
+	plan.Errors = append(plan.Errors, plan.BlockedByPolicy...)
+	if len(plan.RequiredInputs) > 0 || preflight.HasFailedRequiredCheck() || len(cleanupPlan.Blockers) > 0 || len(plan.BlockedByPolicy) > 0 {
 		plan.ReadyForRepair = false
 		plan.Status = RepairPlanStatusNotReady
 	} else if len(plan.Warnings) > 0 {
@@ -231,11 +236,11 @@ func (w DryRunWorkflow) runPreflight(ctx *app.AppContext) PreflightResult {
 	})
 }
 
-func (w DryRunWorkflow) buildCleanupPlan(report detector.DetectionReport) cleaner.CleanupPlan {
+func (w DryRunWorkflow) buildCleanupPlan(report detector.DetectionReport, policy *config.PolicySummary) cleaner.CleanupPlan {
 	if w.BuildCleanupPlan != nil {
 		return w.BuildCleanupPlan(report)
 	}
-	return cleaner.BuildPlan(report, cleaner.PlanOptions{DryRun: true})
+	return cleaner.BuildPlan(report, cleaner.PlanOptions{DryRun: true, Policy: policy})
 }
 
 type repairPlanArtifacts struct {
@@ -278,6 +283,9 @@ type RepairPlan struct {
 	Warnings        []string                             `json:"warnings,omitempty"`
 	Errors          []string                             `json:"errors,omitempty"`
 	NextCommand     string                               `json:"next_command,omitempty"`
+	Policy          config.PolicySummary                 `json:"policy"`
+	PolicyDecisions []string                             `json:"policy_decisions,omitempty"`
+	BlockedByPolicy []string                             `json:"blocked_by_policy,omitempty"`
 }
 
 type CleanupPlanSummary struct {

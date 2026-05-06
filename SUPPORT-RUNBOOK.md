@@ -17,6 +17,17 @@ Optional team defaults can be placed in `kigrepair.yaml`:
 
 Never store invite values or secrets in configuration.
 
+Select a policy profile per case:
+
+```powershell
+.\kigrepair.exe check --profile conservative
+.\kigrepair.exe verify --profile diagnostic
+.\kigrepair.exe repair --dry-run --profile conservative --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
+.\kigrepair.exe collect-report --profile diagnostic
+```
+
+`standard` is normal support usage, `conservative` is for uncertain or high-risk endpoints, and `diagnostic` favors read-only evidence collection. CLI `--profile` overrides YAML for that run.
+
 ## Safety
 
 Read-only / non-destructive except report writing: `check`, `verify`, `preflight`, `repair --dry-run`, `cleanup --dry-run`, `collect-report`, `reports list`, `reports cleanup --dry-run`, `version`.
@@ -51,6 +62,8 @@ Review `summary.txt`, `classification-result.json`, and `verification-result.jso
 ```
 
 Review `preflight-result.json`, `repair-plan.json`, and `cleanup-plan.json`.
+
+Confirm the active profile and policy decisions in `config-metadata.json`, `preflight-result.json`, and `repair-plan.json`.
 
 ## 3. Real Repair
 

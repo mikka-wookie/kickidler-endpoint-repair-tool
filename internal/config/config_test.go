@@ -100,8 +100,31 @@ func TestProfiles(t *testing.T) {
 		t.Fatalf("conservative profile not stricter: %+v ok=%t", conservative, ok)
 	}
 	diagnostic, ok := ConfigForProfile("diagnostic")
-	if !ok || diagnostic.Wizard.OfferRepair {
+	if !ok || diagnostic.Wizard.OfferRepair || diagnostic.Logging.Level != "debug" || diagnostic.Reports.KeepLast != 30 {
 		t.Fatalf("diagnostic profile should not offer repair: %+v ok=%t", diagnostic, ok)
+	}
+	if conservative.Cleanup.AllowHiddenWMICleanup {
+		t.Fatal("conservative profile must not allow ambiguous hidden WMI cleanup by default")
+	}
+}
+
+func TestProfileOverrideBeatsYAMLProfile(t *testing.T) {
+	effective, err := ParseWithProfileOverride([]byte(`schema_version: 1
+profile: diagnostic
+reports:
+  keep_last: 11
+`), "conservative")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effective.Config.Profile != "conservative" || !effective.ProfileOverriddenByCLI {
+		t.Fatalf("profile override not applied: %+v", effective)
+	}
+	if effective.Config.Reports.RetentionDays != 60 {
+		t.Fatalf("profile defaults not applied before YAML merge: %+v", effective.Config.Reports)
+	}
+	if effective.Config.Reports.KeepLast != 11 {
+		t.Fatalf("YAML setting should override selected profile default: %+v", effective.Config.Reports)
 	}
 }
 
@@ -139,6 +162,50 @@ func TestForbiddenKeysFail(t *testing.T) {
 			_, err := Parse([]byte("schema_version: 1\n" + key + ": raw\n"))
 			if err == nil || !strings.Contains(err.Error(), "must not store invite values or secrets") {
 				t.Fatalf("Parse() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestNestedForbiddenKeysFail(t *testing.T) {
+	_, err := Parse([]byte(`schema_version: 1
+repair:
+  nested_token: raw
+`))
+	if err == nil || !strings.Contains(err.Error(), "forbidden key") {
+		t.Fatalf("Parse() error = %v, want forbidden nested key", err)
+	}
+}
+
+func TestUnknownFieldsFail(t *testing.T) {
+	_, err := Parse([]byte(`schema_version: 1
+repair:
+  unexpected_policy: true
+`))
+	if err == nil || !strings.Contains(err.Error(), "field unexpected_policy not found") {
+		t.Fatalf("Parse() error = %v, want unknown field error", err)
+	}
+}
+
+func TestHardSafetyCannotBeDisabled(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		errPart string
+	}{
+		{name: "admin", mutate: func(c *Config) { c.Repair.RequireAdminForDestructive = false }, errPart: "require_admin_for_destructive"},
+		{name: "yes", mutate: func(c *Config) { c.Repair.RequireYesForNonInteractive = false }, errPart: "require_yes_for_non_interactive"},
+		{name: "rollback", mutate: func(c *Config) { c.Repair.RequireRollbackSnapshot = false }, errPart: "require_rollback_snapshot"},
+		{name: "allowlist", mutate: func(c *Config) { c.Cleanup.RequireExactAllowlist = false }, errPart: "require_exact_allowlist"},
+		{name: "revalidation", mutate: func(c *Config) { c.Cleanup.RequireRevalidationBeforeMutation = false }, errPart: "require_revalidation_before_mutation"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			tt.mutate(&cfg)
+			result := ValidateConfig(cfg)
+			if !containsText(result.Errors, tt.errPart) {
+				t.Fatalf("Errors = %v, want %q", result.Errors, tt.errPart)
 			}
 		})
 	}

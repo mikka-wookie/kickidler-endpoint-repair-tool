@@ -10,6 +10,14 @@ C:\ProgramData\kigrepair\Reports\<timestamp>\
 
 Optional YAML configuration can change defaults such as report root, retention, installer lookup paths, logging, bundle collection, and wizard behavior. It cannot store invite values or secrets, and CLI flags override config values. Built-in defaults remain safe when no config file exists.
 
+Policy profiles make repair strategy explicit:
+
+- `standard` is the normal balanced support profile.
+- `conservative` reduces mutation risk, skips hidden WMI cleanup unless strong evidence exists, and blocks repair when detection confidence is low.
+- `diagnostic` favors check, verify, preflight, dry-run, and collect-report workflows with richer diagnostics.
+
+Profiles only add policy gates or safer defaults. They must not weaken hardcoded hidden WMI validation, cleanup path allowlisting, rollback snapshot requirements, or service/process trust validation.
+
 ## Command Safety Classes
 
 Read-only / non-destructive except report writing:
@@ -70,6 +78,8 @@ System-modifying commands require administrator rights. Quiet, non-interactive, 
 ## `--yes` requirements
 
 `--yes` is required for approved non-interactive mutation. Missing confirmation should stop the operation before mutation.
+
+The config file cannot disable administrator requirements, non-interactive `--yes`, rollback snapshot creation, exact cleanup allowlists, or revalidation before mutation. `config validate` rejects those combinations.
 
 ## Cleanup plan validation
 

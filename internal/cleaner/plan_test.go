@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"kigrepair/internal/config"
 	"kigrepair/internal/detector"
 )
 
@@ -110,6 +111,21 @@ func TestBuildPlanPlansMSIUninstallWhenMSIRegistryExists(t *testing.T) {
 	}, testPlanOptions(nil, nil))
 
 	assertAction(t, plan, CleanupActionMSIUninstall, `{EB1FBC37-0B97-4CF5-A329-CF28BA653748}`)
+}
+
+func TestConservativePolicySkipsHiddenWMIPathCleanup(t *testing.T) {
+	cfg, _ := config.ConfigForProfile("conservative")
+	policy := config.EffectiveConfig{Config: cfg}.PolicySummary()
+	opts := testPlanOptions(map[string]bool{
+		`C:\Windows\System32\wmi`: true,
+	}, nil)
+	opts.Policy = &policy
+	plan := BuildPlan(detector.DetectionReport{}, opts)
+
+	assertNoAction(t, plan, CleanupActionDeletePath, `C:\Windows\System32\wmi`)
+	if len(plan.Skipped) != 1 || plan.Skipped[0].PolicyStatus != "skipped_by_policy" {
+		t.Fatalf("expected hidden WMI path skipped by policy, got %#v", plan.Skipped)
+	}
 }
 
 func testPlanOptions(existing map[string]bool, validateErr error) PlanOptions {

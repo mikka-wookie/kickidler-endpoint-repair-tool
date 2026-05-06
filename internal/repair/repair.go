@@ -13,6 +13,7 @@ import (
 	"kigrepair/internal/checks"
 	"kigrepair/internal/classifier"
 	"kigrepair/internal/cleaner"
+	"kigrepair/internal/config"
 	"kigrepair/internal/defender"
 	"kigrepair/internal/detector"
 	"kigrepair/internal/installer"
@@ -57,6 +58,7 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 		Force:          ctx.Force,
 		InviteProvided: strings.TrimSpace(w.Invite) != "",
 		ReportDir:      ctx.OutputDir,
+		Policy:         ctx.ConfigPolicy(),
 	}
 	ctx.JSONValue = result
 	ctx.Logger.Info("repair started")
@@ -103,7 +105,8 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 	}
 	addOperation(ctx, "initial_detection", "grabber", detectionStatus(initial), "Initial detection completed with health: "+string(initial.Health), "")
 
-	plan := w.buildCleanupPlan(initial)
+	policy := ctx.ConfigPolicy()
+	plan := w.buildCleanupPlan(initial, &policy)
 	plan.Actions = cleaner.SortActionsForExecution(plan.Actions)
 	if err := ctx.Reporter.WriteJSON("cleanup-plan", plan); err != nil {
 		return err
@@ -123,6 +126,26 @@ func (w RepairWorkflow) Run(ctx *app.AppContext) error {
 		ctx.ExitCode = ExitWarnings
 		return w.finish(ctx, result, &initial)
 	}
+
+	defenderPlan := BuildDefenderPlan(initial)
+	defenderPlan.Required = decision.DefenderNeeded
+	policyPreflight := PreflightResult{
+		Command:            "repair",
+		ReportDir:          ctx.OutputDir,
+		AdminRights:        admin,
+		InvitePresent:      result.InviteProvided,
+		InstallerAvailable: true,
+		CreatedAt:          time.Now(),
+	}
+	result.PolicyDecisions, result.BlockedByPolicy = PolicyDecisions(policy, initial, policyPreflight, defenderPlan, plan)
+	result.Warnings = append(result.Warnings, result.PolicyDecisions...)
+	result.Errors = append(result.Errors, result.BlockedByPolicy...)
+	if len(result.BlockedByPolicy) > 0 {
+		ctx.ExitCode = ExitInvalidInput
+		addOperation(ctx, "policy_gate", "repair", app.OperationStatusFailed, "Repair blocked by policy", strings.Join(result.BlockedByPolicy, "; "))
+		return w.finish(ctx, result, &initial)
+	}
+	addOperation(ctx, "policy_gate", "repair", app.OperationStatusSuccess, "Repair policy gates passed", "")
 
 	var resolution installer.InstallerResolution
 	var installerPath string
@@ -352,11 +375,11 @@ func (w RepairWorkflow) validateInputs(ctx *app.AppContext, result *RepairResult
 	return invite, true
 }
 
-func (w RepairWorkflow) buildCleanupPlan(report detector.DetectionReport) cleaner.CleanupPlan {
+func (w RepairWorkflow) buildCleanupPlan(report detector.DetectionReport, policy *config.PolicySummary) cleaner.CleanupPlan {
 	if w.BuildCleanupPlan != nil {
 		return w.BuildCleanupPlan(report)
 	}
-	return cleaner.BuildPlan(report, cleaner.PlanOptions{DryRun: false})
+	return cleaner.BuildPlan(report, cleaner.PlanOptions{DryRun: false, Policy: policy})
 }
 
 func (w RepairWorkflow) createRollback(ctx *app.AppContext, initial detector.DetectionReport, plan cleaner.CleanupPlan, decision Decision, installerPath string, hasInvite bool, isAdmin bool) (*rollback.RollbackInfo, error) {

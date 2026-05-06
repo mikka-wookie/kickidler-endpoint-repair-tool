@@ -37,6 +37,7 @@ func finishedOrNow(value time.Time) time.Time {
 func FormatSummary(result RepairResult, final *detector.DetectionReport) string {
 	var b strings.Builder
 	b.WriteString("Kigrepair Repair\n\n")
+	b.WriteString("Active profile: " + valueOrDash(result.Policy.Profile) + "\n")
 	b.WriteString("Initial health: " + valueOrDash(result.InitialHealth) + "\n")
 	b.WriteString("Install mode: " + valueOrDash(result.InitialInstallMode) + "\n")
 	b.WriteString("Install root: " + valueOrDash(result.InitialInstallRoot) + "\n\n")

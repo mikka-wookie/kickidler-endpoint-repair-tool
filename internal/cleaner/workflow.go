@@ -50,7 +50,8 @@ func (w CleanupWorkflow) Run(ctx *app.AppContext) error {
 	ctx.AddResult(detectResult)
 	logging.LogOperation(ctx.Logger, detectResult)
 
-	plan := BuildPlan(report, PlanOptions{DryRun: w.DryRun})
+	policy := ctx.ConfigPolicy()
+	plan := BuildPlan(report, PlanOptions{DryRun: w.DryRun, Policy: &policy})
 	plan.Actions = SortActionsForExecution(plan.Actions)
 	ctx.Logger.Info("cleanup path validation completed")
 	ctx.Logger.Info("cleanup plan generated")
@@ -74,6 +75,17 @@ func (w CleanupWorkflow) Run(ctx *app.AppContext) error {
 			ctx.AddResult(result)
 			logging.LogOperation(ctx.Logger, result)
 		}
+	}
+	for _, action := range plan.Skipped {
+		result := app.OperationResult{
+			Step:      "cleanup.plan." + string(action.Type),
+			Target:    action.Target,
+			Status:    app.OperationStatusSkipped,
+			Message:   action.Error,
+			Timestamp: time.Now(),
+		}
+		ctx.AddResult(result)
+		logging.LogOperation(ctx.Logger, result)
 	}
 	for _, warning := range plan.Warnings {
 		result := app.OperationResult{
