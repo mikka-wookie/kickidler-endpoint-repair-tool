@@ -66,6 +66,9 @@ kigrepair-support-bundle.zip
 - [GUI MVP](docs/GUI-MVP.md)
 - [Release Checklist](docs/RELEASE-CHECKLIST.md)
 - [Release Trust](docs/RELEASE-TRUST.md)
+- [VM Testing](docs/vm-testing/README.md)
+- [Rollout](docs/ROLLOUT.md)
+- [Known Limitations](docs/KNOWN-LIMITATIONS.md)
 - [Short Support Runbook](SUPPORT-RUNBOOK.md)
 
 ## MSI Assets
@@ -111,6 +114,15 @@ Validate a release folder and zip:
 ```
 
 The release script does not bundle Grabber MSI installers. Support engineers must place approved MSI files locally when needed.
+
+Before pilot or internal-stable promotion, run the real-Windows VM gates documented in [VM Testing](docs/vm-testing/README.md). From the repository validation workspace, Tier 0 smoke can be started against a built or unpacked release binary with:
+
+```powershell
+.\scripts\vm-tests\run-smoke-readonly.ps1 `
+  -KigrepairPath ".\kigrepair.exe" `
+  -OutDir ".\evidence\tier0-smoke" `
+  -Profile standard
+```
 
 ## Development Validation
 

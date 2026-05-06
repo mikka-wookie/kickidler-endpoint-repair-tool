@@ -1,0 +1,81 @@
+{
+  "schema": "kigrepair.vm_scenarios.v1",
+  "scenarios": [
+    {
+      "id": "VM-001",
+      "name": "healthy_standard_install",
+      "tier": 1,
+      "destructive": false,
+      "requires_admin": false,
+      "requires_installer": true,
+      "requires_invite": false,
+      "requires_hidden_wmi": false,
+      "requires_defender": true,
+      "commands": ["check", "verify", "collect-report"],
+      "expected_exit_codes": [0, 1],
+      "expected_files": ["initial-detection.json", "verification-result.json", "summary.txt"],
+      "gate_level": "pilot"
+    },
+    {
+      "id": "VM-003",
+      "name": "not_installed_clean_machine",
+      "tier": 1,
+      "destructive": false,
+      "requires_admin": false,
+      "requires_installer": false,
+      "requires_invite": false,
+      "requires_hidden_wmi": false,
+      "requires_defender": false,
+      "commands": ["version --json", "config show", "check", "verify", "cleanup --dry-run", "collect-report", "reports list"],
+      "expected_exit_codes": [0, 1, 7],
+      "expected_files": ["vm-smoke-result.json", "initial-detection.json", "summary.txt"],
+      "gate_level": "pilot"
+    },
+    {
+      "id": "VM-014",
+      "name": "invalid_installer_blocks_repair",
+      "tier": 1,
+      "destructive": false,
+      "requires_admin": false,
+      "requires_installer": false,
+      "requires_invite": true,
+      "requires_hidden_wmi": false,
+      "requires_defender": false,
+      "commands": ["preflight", "repair --dry-run"],
+      "expected_exit_codes": [7],
+      "expected_files": ["preflight-result.json", "repair-plan.json"],
+      "gate_level": "pilot"
+    },
+    {
+      "id": "VM-020",
+      "name": "support_bundle_redacts_invite",
+      "tier": 1,
+      "destructive": false,
+      "requires_admin": false,
+      "requires_installer": true,
+      "requires_invite": true,
+      "requires_hidden_wmi": false,
+      "requires_defender": false,
+      "commands": ["preflight", "repair --dry-run", "collect-report", "run-redaction-check"],
+      "expected_exit_codes": [0, 1, 7],
+      "expected_files": ["redaction-check-result.json", "kigrepair-support-bundle.zip"],
+      "gate_level": "pilot"
+    },
+    {
+      "id": "VM-019",
+      "name": "report_cleanup_safety",
+      "tier": 2,
+      "destructive": true,
+      "requires_admin": false,
+      "requires_installer": false,
+      "requires_invite": false,
+      "requires_hidden_wmi": false,
+      "requires_defender": false,
+      "commands": ["reports cleanup --dry-run", "reports cleanup --yes"],
+      "expected_exit_codes": [0, 1, 3, 7],
+      "expected_files": ["report-cleanup-plan.json"],
+      "gate_level": "internal-stable"
+    }
+  ]
+}
+
