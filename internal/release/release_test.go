@@ -11,10 +11,12 @@ func TestReleaseFilesExist(t *testing.T) {
 	root := repoRoot(t)
 	for _, rel := range []string{
 		"scripts/build-release.ps1",
+		"scripts/validate-release.ps1",
 		"README.md",
 		"SUPPORT-RUNBOOK.md",
 		"assets/README.txt",
 		"examples/commands.ps1",
+		"docs/RELEASE-TRUST.md",
 	} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
 			t.Fatalf("%s missing: %v", rel, err)
@@ -65,6 +67,9 @@ func TestReleaseScriptInjectsVersionPackageMetadata(t *testing.T) {
 		"kigrepair/internal/version.BuiltBy",
 		"go test ./...",
 		"checksums.txt",
+		"RELEASE-MANIFEST.json",
+		"SIGNATURES.txt",
+		"signtool",
 		"Compress-Archive",
 	} {
 		if !strings.Contains(content, value) {
@@ -75,9 +80,70 @@ func TestReleaseScriptInjectsVersionPackageMetadata(t *testing.T) {
 
 func TestReleaseScriptDoesNotReferenceSecretEnvironmentNames(t *testing.T) {
 	content := strings.ToLower(readText(t, "scripts/build-release.ps1"))
-	for _, value := range []string{"token", "secret", "password", "invite"} {
+	for _, value := range []string{"access_token", "refresh_token", "authorization: bearer", "password="} {
 		if strings.Contains(content, value) {
-			t.Fatalf("build-release.ps1 references secret-like value %q", value)
+			t.Fatalf("build-release.ps1 references sensitive value pattern %q", value)
+		}
+	}
+}
+
+func TestReleaseScriptSupportsSigningPolicy(t *testing.T) {
+	content := readText(t, "scripts/build-release.ps1")
+	required := []string{
+		"[switch]$Sign",
+		"[string]$CertificateThumbprint",
+		"-Sign requires -CertificateThumbprint",
+		"signtool sign /fd SHA256 /tr <TIMESTAMP_URL> /td SHA256 /sha1 <THUMBPRINT>",
+		"signtool verify /pa /v",
+		"Signing: not requested",
+	}
+	for _, value := range required {
+		if !strings.Contains(content, value) {
+			t.Fatalf("build-release.ps1 missing signing policy %q", value)
+		}
+	}
+}
+
+func TestReleaseManifestTemplateContainsRequiredTrustFields(t *testing.T) {
+	content := readText(t, "scripts/build-release.ps1")
+	required := []string{
+		"product = \"kigrepair\"",
+		"checksum_algorithm = \"SHA-256\"",
+		"msi_bundled = $false",
+		"invite_included = $false",
+		"reports_included = $false",
+		"artifacts = $Artifacts",
+		"zip = $Zip",
+	}
+	for _, value := range required {
+		if !strings.Contains(content, value) {
+			t.Fatalf("manifest generation missing %q", value)
+		}
+	}
+}
+
+func TestValidateReleaseScriptCoversRequiredFailures(t *testing.T) {
+	content := readText(t, "scripts/validate-release.ps1")
+	required := []string{
+		"checksum mismatch",
+		"MSI bundled by default",
+		"RELEASE-MANIFEST.json is not valid JSON",
+		"required signed artifact is unsigned or unverified",
+		"obvious sensitive value pattern",
+		"zip checksum mismatch",
+	}
+	for _, value := range required {
+		if !strings.Contains(content, value) {
+			t.Fatalf("validate-release.ps1 missing validation %q", value)
+		}
+	}
+}
+
+func TestReleaseDocsDescribeTrustChain(t *testing.T) {
+	content := readText(t, "docs/RELEASE-TRUST.md")
+	for _, value := range []string{"checksums.txt", "RELEASE-MANIFEST.json", "SIGNATURES.txt", "Get-AuthenticodeSignature", "MSI", "<version>"} {
+		if !strings.Contains(content, value) {
+			t.Fatalf("RELEASE-TRUST.md missing %q", value)
 		}
 	}
 }

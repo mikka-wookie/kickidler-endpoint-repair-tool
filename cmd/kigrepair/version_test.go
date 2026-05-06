@@ -21,7 +21,7 @@ func TestVersionCommandJSONIncludesBuildFields(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
 		t.Fatalf("version output is not JSON: %v\n%s", err, out.String())
 	}
-	for _, field := range []string{"tool", "version", "commit", "build_date", "built_by", "go_version", "os", "arch"} {
+	for _, field := range []string{"tool", "version", "commit", "build_date", "built_by", "go_version", "os", "arch", "signed_status"} {
 		if strings.TrimSpace(payload[field]) == "" {
 			t.Fatalf("version JSON field %q is empty: %#v", field, payload)
 		}

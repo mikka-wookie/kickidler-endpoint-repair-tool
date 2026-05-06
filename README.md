@@ -65,6 +65,7 @@ kigrepair-support-bundle.zip
 - [GUI Boundary](docs/GUI-BOUNDARY.md)
 - [GUI MVP](docs/GUI-MVP.md)
 - [Release Checklist](docs/RELEASE-CHECKLIST.md)
+- [Release Trust](docs/RELEASE-TRUST.md)
 - [Short Support Runbook](SUPPORT-RUNBOOK.md)
 
 ## MSI Assets
@@ -92,9 +93,22 @@ The script runs formatting, dependency tidy, tests, and a Windows amd64 build wi
 ```text
 dist\kigrepair-0.1.0-windows-amd64\
 dist\kigrepair-0.1.0-windows-amd64.zip
+dist\kigrepair-0.1.0-windows-amd64.zip.sha256
 ```
 
-Release folder layout includes `kigrepair.exe`, `README.md`, `SUPPORT-RUNBOOK.md`, `docs\`, `assets\README.txt`, `examples\commands.ps1`, `examples\kigrepair.sample.yaml`, and checksums. Add `-IncludeGui` to also build and checksum `kigrepair-gui.exe`.
+Release folder layout includes `kigrepair.exe`, optional `kigrepair-gui.exe`, `README.md`, `SUPPORT-RUNBOOK.md`, `docs\`, `assets\README.txt`, `examples\commands.ps1`, `checksums.txt`, `RELEASE-MANIFEST.json`, and `SIGNATURES.txt`.
+
+Unsigned internal builds are allowed and clearly marked in `SIGNATURES.txt`. For signed support releases:
+
+```powershell
+.\scripts\build-release.ps1 -Version 0.1.0 -IncludeGui -Sign -CertificateThumbprint "<THUMBPRINT>" -TimestampUrl "<TIMESTAMP_URL>" -Clean
+```
+
+Validate a release folder and zip:
+
+```powershell
+.\scripts\validate-release.ps1 -ReleaseDir ".\dist\kigrepair-0.1.0-windows-amd64" -ZipPath ".\dist\kigrepair-0.1.0-windows-amd64.zip"
+```
 
 The release script does not bundle Grabber MSI installers. Support engineers must place approved MSI files locally when needed.
 

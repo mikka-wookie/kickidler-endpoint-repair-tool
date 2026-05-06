@@ -293,6 +293,9 @@ func (w *mainWindow) updateDashboard(view ResultView) {
 	}
 	prefix := []string{
 		"App version: " + info.Version,
+		"Commit: " + info.Commit,
+		"Build date: " + info.BuildDate,
+		"Signed status: " + info.SignedStatus,
 		"Active profile: " + emptyAs(w.activeProfile, emptyAs(getText(w.controls[idProfile]), "standard")),
 		"Config source: " + emptyAs(w.configSource, "defaults"),
 		"Admin: " + admin,

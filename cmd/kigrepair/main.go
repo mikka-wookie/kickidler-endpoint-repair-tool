@@ -534,6 +534,10 @@ func versionCommand(opts *globalOptions) *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "Built by: %s\n", info.BuiltBy)
 			fmt.Fprintf(cmd.OutOrStdout(), "Go: %s\n", info.GoVersion)
 			fmt.Fprintf(cmd.OutOrStdout(), "Platform: %s/%s\n", info.OS, info.Arch)
+			fmt.Fprintf(cmd.OutOrStdout(), "Signed status: %s\n", info.SignedStatus)
+			if strings.TrimSpace(info.ExecutablePath) != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "Executable: %s\n", info.ExecutablePath)
+			}
 			return nil
 		},
 	}

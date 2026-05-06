@@ -19,6 +19,8 @@ Workflow reports include a Run ID, operation IDs, a support-readable timeline in
 
 The CLI remains the primary automation interface. The GUI MVP calls the shared workflow service boundary instead of shelling out to `kigrepair.exe` or parsing console text. See [GUI Boundary](GUI-BOUNDARY.md) and [GUI MVP](GUI-MVP.md).
 
+Release artifacts include `checksums.txt`, `RELEASE-MANIFEST.json`, and `SIGNATURES.txt`. See [Release Trust](RELEASE-TRUST.md).
+
 ## GUI MVP
 
 Build and launch on Windows:
@@ -74,6 +76,8 @@ Example:
 ```
 
 Expected exit codes: `0` success, `10` unexpected error.
+
+Output includes version, commit, build date, built by, Go version, OS/arch, signed status, and executable path. Signed status is verified by release validation scripts; runtime output may show `unknown` when the executable has not been checked by the release pipeline.
 
 ## config
 

@@ -21,6 +21,8 @@ If a command reports `repair_disabled_by_policy`, `defender_required_but_unavail
 
 Reports are written under `C:\ProgramData\kigrepair\Reports\<timestamp>\`. Attach `kigrepair-support-bundle.zip` when escalating.
 
+For release package validation, use `scripts\validate-release.ps1` and review `RELEASE-MANIFEST.json`, `checksums.txt`, and `SIGNATURES.txt`. See [Release Trust](RELEASE-TRUST.md).
+
 ## Reading A Failed Run
 
 1. Open `summary.txt` and note the `Run ID`.

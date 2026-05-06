@@ -20,6 +20,8 @@ Profiles only add policy gates or safer defaults. They must not weaken hardcoded
 
 GUI boundaries use the same workflow service as CLI adapters. The GUI must not bypass admin checks, `--yes`/confirmation requirements, installer validation, policy gates, rollback snapshot creation, or cleanup path validation. The GUI MVP blocks real repair unless the process is elevated and the user types exact `YES` in the destructive confirmation dialog.
 
+Release trust-chain scripts only affect build artifacts, checksums, manifest, signatures, and documentation packaging. They must not weaken runtime safety gates or bundle a Grabber MSI by default. See [Release Trust](RELEASE-TRUST.md).
+
 ## Command Safety Classes
 
 Read-only / non-destructive except report writing:

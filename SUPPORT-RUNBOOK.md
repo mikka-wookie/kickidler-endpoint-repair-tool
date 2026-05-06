@@ -50,6 +50,12 @@ The GUI MVP is available as `kigrepair-gui.exe` for support engineers who prefer
 .\kigrepair-gui.exe
 ```
 
+For release verification, check `RELEASE-MANIFEST.json`, `checksums.txt`, and `SIGNATURES.txt`, or run:
+
+```powershell
+.\scripts\validate-release.ps1 -ReleaseDir ".\dist\kigrepair-<version>-windows-amd64"
+```
+
 ## 1. Basic Triage
 
 ```powershell
