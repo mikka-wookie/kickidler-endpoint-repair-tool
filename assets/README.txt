@@ -1,4 +1,6 @@
-Place a supported Grabber MSI installer in this folder when using installer auto-discovery.
+MSI is not bundled by default.
+
+Place an approved Grabber MSI installer in this folder only when instructed by the support or release owner.
 
 Supported names:
 
@@ -8,4 +10,5 @@ Supported names:
 - grabberTT.x32.msi
 - grabber.msi
 
-Do not place invite values in files.
+Do not place invites, credentials, tokens, or other secrets in this folder.
+Do not rename unknown MSI files to bypass installer validation.

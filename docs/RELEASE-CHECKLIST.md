@@ -1,114 +1,98 @@
 # kigrepair Release Checklist
 
-Use this checklist before distributing a new internal build.
+Use this checklist before distributing a new internal or support release.
 
-## Command Safety Classes
+## A. Before Build
 
-Read-only / non-destructive except report writing: `check`, `verify`, `preflight`, `repair --dry-run`, `cleanup --dry-run`, `collect-report`, `reports list`, `reports cleanup --dry-run`, `version`.
+- Confirm the repository is clean or all local changes are intentional.
+- Run or plan to run the standard validation commands, including `go test ./...`.
+- Select the release version.
+- Update release notes when applicable.
+- Search docs, config, and examples for credentials, tokens, raw invite values, and customer data.
+- Confirm an approved signing certificate is available if this is a signed support release.
 
-System-modifying / destructive: `cleanup --yes`, `repair --yes`, `install --yes`, `defender ensure --yes`, `reports cleanup --yes`.
+## B. Build
 
-Do not paste real invite values into tickets, screenshots, or shared logs. `kigrepair` output should redact invite values. Command examples must use `<INVITE>`. Support bundles should not contain raw invite values.
-
-## Build Validation
-
-```powershell
-gofmt -w .
-go mod tidy
-go test ./...
-go build -o kigrepair.exe ./cmd/kigrepair
-```
-
-## Build Release
+Unsigned internal build:
 
 ```powershell
-.\scripts\build-release.ps1 -Version 0.1.0
+.\scripts\build-release.ps1 -Version "0.1.0-dev" -Clean
 ```
 
-## Verify Version Metadata
+Signed support build:
 
 ```powershell
-.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe version
-.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe version --json
+.\scripts\build-release.ps1 -Version "0.1.0" -IncludeGui -Sign -CertificateThumbprint "<THUMBPRINT>" -TimestampUrl "<TIMESTAMP_URL>" -Clean
 ```
 
-Confirm version, commit, build date, built by, Go version, OS, and architecture.
+Capture script output in the internal release ticket.
 
-## Inspect Checksums
+## C. Validate
 
 ```powershell
-Get-Content .\dist\kigrepair-0.1.0-windows-amd64\checksums.txt
-Get-Content .\dist\kigrepair-0.1.0-windows-amd64\checksums.json
+.\scripts\validate-release.ps1 -ReleaseDir ".\dist\kigrepair-0.1.0-windows-amd64" -ZipPath ".\dist\kigrepair-0.1.0-windows-amd64.zip"
 ```
 
-Confirm `kigrepair.exe` and the release ZIP are present.
-
-## Inspect Release Archive
+For signed releases:
 
 ```powershell
-Expand-Archive .\dist\kigrepair-0.1.0-windows-amd64.zip -DestinationPath "$env:TEMP\kigrepair-release-test" -Force
-Get-ChildItem "$env:TEMP\kigrepair-release-test" -Recurse
+.\scripts\validate-release.ps1 -ReleaseDir ".\dist\kigrepair-0.1.0-windows-amd64" -ZipPath ".\dist\kigrepair-0.1.0-windows-amd64.zip" -RequireSigned
 ```
 
-Expected layout:
+Verify:
 
-```text
-dist/
-  kigrepair-0.1.0-windows-amd64/
-    kigrepair.exe
-    README.md
-    SUPPORT-RUNBOOK.md
-    docs/
-      SUPPORT-KB.md
-      COMMAND-REFERENCE.md
-      REPORT-FILES.md
-      CLASSIFICATIONS.md
-      EXIT-CODES.md
-      TROUBLESHOOTING.md
-      ESCALATION-CHECKLIST.md
-      SAFETY-MODEL.md
-      RELEASE-CHECKLIST.md
-      CONFIGURATION.md
-    assets/
-      README.txt
-    examples/
-      commands.ps1
-      kigrepair.sample.yaml
-    checksums.txt
-    checksums.json
-```
+- `checksums.txt` matches release folder files.
+- `RELEASE-MANIFEST.json` parses and lists `kigrepair.exe`.
+- `SIGNATURES.txt` records unsigned warning or successful signing.
+- `kigrepair.exe version --json` shows version, commit, build date, built by, Go version, OS/arch, signed status, and executable path.
 
-## Read-only Smoke Tests
+## D. Smoke Test
 
 ```powershell
 .\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe version
-.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe check --help
-.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe repair --help
-.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe reports --help
-.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe config sample
-.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe config validate --config ".\dist\kigrepair-0.1.0-windows-amd64\examples\kigrepair.sample.yaml"
+.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe check
+.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe verify
+.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe config show
+.\dist\kigrepair-0.1.0-windows-amd64\kigrepair.exe repair --dry-run --installer ".\assets\grabberEM.x64.msi" --invite "<INVITE>"
 ```
 
-## Documentation Checks
+Run a redaction search with a known placeholder from your test case:
 
-- Verify docs are included in the release folder and ZIP.
-- Verify README links to every file in `docs\`.
-- Verify `SUPPORT-RUNBOOK.md` is short and operational.
-- Verify no real invite values or secrets are in the archive.
-- Verify all examples use `<INVITE>`.
-- Verify `assets\README.txt` is present.
-- Verify `examples\commands.ps1` is present.
-- Verify `examples\kigrepair.sample.yaml` is present and contains no invite or secrets.
+```powershell
+Get-ChildItem ".\dist\kigrepair-0.1.0-windows-amd64" -Recurse -File | Select-String -Pattern "<REDACTED>"
+```
 
-## Final Review
+Expected: no matches.
 
-- Run tests.
-- Build release.
-- Verify version metadata.
-- Check checksums.
-- Inspect release archive.
-- Run read-only smoke tests.
-- Verify docs included.
-- Verify no real invite/secrets in archive.
-- Verify `assets\README.txt`.
-- Verify release ZIP extraction.
+Check for bundled MSI files:
+
+```powershell
+Get-ChildItem ".\dist\kigrepair-0.1.0-windows-amd64" -Recurse -Filter *.msi
+```
+
+Expected: no results.
+
+## E. Publish
+
+Upload or attach:
+
+- `kigrepair-<version>-windows-amd64.zip`
+- `kigrepair-<version>-windows-amd64.zip.sha256`
+- `RELEASE-MANIFEST.json`
+- `SIGNATURES.txt`
+- release notes or ticket link
+
+Record whether the build is signed or unsigned.
+
+## F. Rollback
+
+- Keep the previous release zip and checksum.
+- Document how support should revert to the prior release.
+- Do not delete previous release artifacts until the new release has passed support smoke testing.
+
+## Never Include
+
+- Raw invite values.
+- Customer logs unless they are part of an approved redacted support bundle.
+- Grabber MSI files unless explicitly approved for that distribution.
+- Certificate private keys or export files.

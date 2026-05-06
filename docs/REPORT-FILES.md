@@ -40,6 +40,8 @@ Workflow service responses return paths to report files instead of embedding sup
 
 The GUI MVP displays report paths returned by the workflow service. It does not create a separate evidence format; `summary.txt`, `operations.json`, primary result JSON, `repair.log`, and `kigrepair-support-bundle.zip` remain the support artifacts.
 
+Support bundle manifests include `kigrepair` build metadata such as version, commit, build date, Go version, OS/arch, signed status, and executable path where available.
+
 ## File Reference
 
 | File | Purpose | Produced by | How support should read it | Warnings/errors | Included in bundle |
