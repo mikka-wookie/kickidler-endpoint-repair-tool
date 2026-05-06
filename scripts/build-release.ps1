@@ -2,6 +2,7 @@ param(
     [string]$Version = "dev",
     [string]$OutputDir = "dist",
     [switch]$SkipTests,
+    [switch]$IncludeGui,
     [ValidateSet("amd64")]
     [string]$Arch = "amd64"
 )
@@ -82,6 +83,7 @@ $packageName = "kigrepair-$Version-$targetOS-$Arch"
 $resolvedOutputDir = Join-Path $repoRoot $OutputDir
 $releaseDir = Join-Path $resolvedOutputDir $packageName
 $binaryPath = Join-Path $releaseDir "kigrepair.exe"
+$guiBinaryPath = Join-Path $releaseDir "kigrepair-gui.exe"
 $zipPath = Join-Path $resolvedOutputDir "$packageName.zip"
 $checksumPath = Join-Path $releaseDir "checksums.txt"
 $checksumsJsonPath = Join-Path $releaseDir "checksums.json"
@@ -133,6 +135,23 @@ Invoke-Step "Building $binaryPath" {
     }
 }
 
+if ($IncludeGui) {
+    Invoke-Step "Building $guiBinaryPath" {
+        $previousGOOS = $env:GOOS
+        $previousGOARCH = $env:GOARCH
+        try {
+            $env:GOOS = $targetOS
+            $env:GOARCH = $Arch
+            go build -trimpath -ldflags $ldflags -o $guiBinaryPath ./cmd/kigrepair-gui
+        } finally {
+            $env:GOOS = $previousGOOS
+            $env:GOARCH = $previousGOARCH
+        }
+    }
+} else {
+    Write-Warning "Skipping GUI build. Use -IncludeGui to include kigrepair-gui.exe."
+}
+
 Invoke-Step "Copying release documentation" {
     Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path $releaseDir "README.md") -Force
     Copy-Item -LiteralPath (Join-Path $repoRoot "SUPPORT-RUNBOOK.md") -Destination (Join-Path $releaseDir "SUPPORT-RUNBOOK.md") -Force
@@ -150,6 +169,9 @@ Invoke-Step "Generating executable checksum" {
     }
     $checksums = @()
     $checksums += Add-ChecksumLine -ChecksumPath $checksumPath -FilePath $binaryPath -DisplayName "kigrepair.exe"
+    if (Test-Path -LiteralPath $guiBinaryPath -PathType Leaf) {
+        $checksums += Add-ChecksumLine -ChecksumPath $checksumPath -FilePath $guiBinaryPath -DisplayName "kigrepair-gui.exe"
+    }
     $checksums | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $checksumsJsonPath -Encoding UTF8
 }
 
@@ -171,6 +193,9 @@ Invoke-Step "Validating release binary metadata" {
     & $binaryPath repair --help | Out-Null
     & $binaryPath reports --help | Out-Null
     & $binaryPath config sample | Out-Null
+    if (Test-Path -LiteralPath $guiBinaryPath -PathType Leaf) {
+        Write-Host "GUI binary included: $guiBinaryPath"
+    }
 }
 
 Write-Host ""

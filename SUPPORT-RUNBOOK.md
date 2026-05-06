@@ -44,7 +44,11 @@ Use the `Run ID` in `summary.txt` to correlate `operations.json`, `repair.log`, 
 
 Reports and bundles should redact raw invite values and common secrets. If a raw invite appears, do not attach the file until it is sanitized.
 
-No GUI is available yet. Future GUI builds must use the shared workflow service and the same report files; they must not parse CLI console output or store invite values.
+The GUI MVP is available as `kigrepair-gui.exe` for support engineers who prefer a single-window workflow shell. It uses the shared workflow service and the same report files; it must not parse CLI console output or store invite values.
+
+```powershell
+.\kigrepair-gui.exe
+```
 
 ## 1. Basic Triage
 

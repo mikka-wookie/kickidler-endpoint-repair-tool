@@ -18,7 +18,7 @@ Policy profiles make repair strategy explicit:
 
 Profiles only add policy gates or safer defaults. They must not weaken hardcoded hidden WMI validation, cleanup path allowlisting, rollback snapshot requirements, or service/process trust validation.
 
-GUI boundaries must use the same workflow service as CLI adapters. A GUI must not bypass admin checks, `--yes`/confirmation requirements, installer validation, policy gates, rollback snapshot creation, or cleanup path validation. No GUI is implemented yet.
+GUI boundaries use the same workflow service as CLI adapters. The GUI must not bypass admin checks, `--yes`/confirmation requirements, installer validation, policy gates, rollback snapshot creation, or cleanup path validation. The GUI MVP blocks real repair unless the process is elevated and the user types exact `YES` in the destructive confirmation dialog.
 
 ## Command Safety Classes
 
