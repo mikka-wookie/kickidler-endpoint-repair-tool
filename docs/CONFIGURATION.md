@@ -61,6 +61,8 @@ Config files must not contain invite values, passwords, tokens, authorization he
 
 Forbidden key names include `invite`, `password`, `token`, `access_token`, `refresh_token`, `secret`, and `authorization`.
 
+Workflow service request structs may hold an invite in memory for one run, but invite fields are non-serializable and must never be stored in config, logs, reports, or support bundles.
+
 ## Sample
 
 See [examples/kigrepair.sample.yaml](../examples/kigrepair.sample.yaml).

@@ -17,6 +17,8 @@ Global observability flags:
 
 Workflow reports include a Run ID, operation IDs, a support-readable timeline in `summary.txt`, structured operation records in `operations.json`, and redacted JSONL events in `repair.log`.
 
+The CLI remains the primary interface. A future GUI must call the shared workflow service boundary instead of shelling out to `kigrepair.exe` or parsing console text. See [GUI Boundary](GUI-BOUNDARY.md).
+
 ## Command Safety Classes
 
 Read-only / non-destructive except report writing:

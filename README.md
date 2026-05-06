@@ -62,6 +62,7 @@ kigrepair-support-bundle.zip
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Escalation Checklist](docs/ESCALATION-CHECKLIST.md)
 - [Safety Model](docs/SAFETY-MODEL.md)
+- [GUI Boundary](docs/GUI-BOUNDARY.md)
 - [Release Checklist](docs/RELEASE-CHECKLIST.md)
 - [Short Support Runbook](SUPPORT-RUNBOOK.md)
 
@@ -108,3 +109,5 @@ go build -o kigrepair.exe ./cmd/kigrepair
 ## Architecture
 
 The project is split into internal packages for app context, workflows, configuration, detection, cleanup, installation, Defender integration, diagnostics, reports, safety validation, Windows wrappers, logging, and future UI surfaces. Keep workflow orchestration separate from low-level Windows operations.
+
+Future GUI code must use the workflow service boundary in `internal/app` and `internal/app/workflowservice`. It must not shell out to `kigrepair.exe` or parse console output.

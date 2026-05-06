@@ -1,6 +1,10 @@
 package app
 
-import "kigrepair/internal/failures"
+import (
+	"time"
+
+	"kigrepair/internal/failures"
+)
 
 func RunWorkflow(ctx *AppContext, workflow Workflow) error {
 	ctx.Run.WorkflowName = workflow.Name()
@@ -13,6 +17,14 @@ func RunWorkflow(ctx *AppContext, workflow Workflow) error {
 	if ctx.Logger != nil {
 		ctx.Logger.Info("starting workflow: %s", workflow.Name())
 	}
+	ctx.EmitProgress(ProgressEvent{
+		RunID:     ctx.Run.RunID,
+		Workflow:  workflow.Name(),
+		Stage:     "workflow_started",
+		Status:    OperationStatusSuccess,
+		Message:   "Workflow started",
+		StartedAt: ctx.Run.StartedAt,
+	})
 
 	err := workflow.Run(ctx)
 	ctx.FinishRun()
@@ -43,11 +55,29 @@ func RunWorkflow(ctx *AppContext, workflow Workflow) error {
 		if ctx.Logger != nil {
 			ctx.Logger.Error("workflow failed: %s: %v", workflow.Name(), err)
 		}
+		ctx.EmitProgress(ProgressEvent{
+			RunID:      ctx.Run.RunID,
+			Workflow:   workflow.Name(),
+			Stage:      "workflow_finished",
+			Status:     OperationStatusFailed,
+			Message:    "Workflow failed",
+			FinishedAt: time.Now(),
+			DurationMS: ctx.Run.DurationMS,
+		})
 		return err
 	}
 
 	if ctx.Logger != nil {
 		ctx.Logger.Info("workflow completed: %s", workflow.Name())
 	}
+	ctx.EmitProgress(ProgressEvent{
+		RunID:      ctx.Run.RunID,
+		Workflow:   workflow.Name(),
+		Stage:      "workflow_finished",
+		Status:     OperationStatusSuccess,
+		Message:    "Workflow completed",
+		FinishedAt: ctx.Run.FinishedAt,
+		DurationMS: ctx.Run.DurationMS,
+	})
 	return nil
 }

@@ -44,6 +44,8 @@ Use the `Run ID` in `summary.txt` to correlate `operations.json`, `repair.log`, 
 
 Reports and bundles should redact raw invite values and common secrets. If a raw invite appears, do not attach the file until it is sanitized.
 
+No GUI is available yet. Future GUI builds must use the shared workflow service and the same report files; they must not parse CLI console output or store invite values.
+
 ## 1. Basic Triage
 
 ```powershell
@@ -99,3 +101,4 @@ Use dry-run first. Real report cleanup deletes only validated old report folders
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Escalation Checklist](docs/ESCALATION-CHECKLIST.md)
 - [Safety Model](docs/SAFETY-MODEL.md)
+- [GUI Boundary](docs/GUI-BOUNDARY.md)
