@@ -27,24 +27,25 @@ type Reporter interface {
 }
 
 type AppContext struct {
-	Mode           RunMode
-	OutputDir      string
-	ReportRoot     string
-	StartedAt      time.Time
-	Quiet          bool
-	NonInteractive bool
-	Force          bool
-	JSONOutput     bool
-	Config         config.Config
-	ConfigMeta     config.Metadata
-	Logger         Logger
-	Reporter       Reporter
-	Results        []OperationResult
-	JSONValue      any
-	ExitCode       int
-	Run            RunMetadata
-	Progress       ProgressSink
-	operationSeq   int
+	Mode            RunMode
+	OutputDir       string
+	ReportRoot      string
+	StartedAt       time.Time
+	Quiet           bool
+	NonInteractive  bool
+	Force           bool
+	JSONOutput      bool
+	Config          config.Config
+	ConfigMeta      config.Metadata
+	Logger          Logger
+	Reporter        Reporter
+	Results         []OperationResult
+	JSONValue       any
+	ExitCode        int
+	Run             RunMetadata
+	Progress        ProgressSink
+	SensitiveValues []string
+	operationSeq    int
 }
 
 func NewContext() *AppContext {
@@ -72,7 +73,7 @@ func NewContext() *AppContext {
 }
 
 func (c *AppContext) AddResult(result OperationResult) {
-	result = RedactOperationResult(result)
+	result = c.RedactOperationResult(result)
 	if result.Timestamp.IsZero() {
 		result.Timestamp = time.Now()
 	}
@@ -108,6 +109,29 @@ func (c *AppContext) AddResult(result OperationResult) {
 	c.Results = append(c.Results, result)
 	c.emitProgress(result, "operation_started")
 	c.emitProgress(result, "operation_finished")
+}
+
+func (c *AppContext) RedactString(value string) string {
+	if c == nil {
+		return safety.RedactString(value)
+	}
+	return safety.RedactStringWithSecrets(value, c.SensitiveValues...)
+}
+
+func (c *AppContext) RedactOperationResult(result OperationResult) OperationResult {
+	result.Step = c.RedactString(result.Step)
+	result.Target = c.RedactString(result.Target)
+	result.Message = c.RedactString(result.Message)
+	result.Details = c.RedactString(result.Details)
+	result.FailureCategory = c.RedactString(result.FailureCategory)
+	result.Error = c.RedactString(result.Error)
+	result.Artifact = c.RedactString(result.Artifact)
+	result.RedactedCommand = c.RedactString(result.RedactedCommand)
+	result.ResultFile = c.RedactString(result.ResultFile)
+	for i := range result.RelatedFiles {
+		result.RelatedFiles[i] = c.RedactString(result.RelatedFiles[i])
+	}
+	return result
 }
 
 func RedactOperationResult(result OperationResult) OperationResult {

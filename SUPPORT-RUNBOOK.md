@@ -50,6 +50,8 @@ The GUI MVP is available as `kigrepair-gui.exe` for support engineers who prefer
 .\kigrepair-gui.exe
 ```
 
+In the GUI, run `Check` or `Verify` first, then use `Preflight` and `Repair Dry-Run` before any real repair. `RUN REAL REPAIR` requires administrator rights and exact confirmation text `YES`; the invite field is masked and cleared after the workflow completes or is cancelled.
+
 For release verification, check `RELEASE-MANIFEST.json`, `checksums.txt`, and `SIGNATURES.txt`, or run:
 
 ```powershell

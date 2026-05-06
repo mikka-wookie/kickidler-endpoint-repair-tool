@@ -88,6 +88,50 @@ func TestResultRenderingDoesNotExposeInvite(t *testing.T) {
 	assertNoInvite(t, view)
 }
 
+func TestBuildResultViewExtractsSupportFields(t *testing.T) {
+	resp := response("collect-report", "warning")
+	resp.Result = map[string]any{
+		"health":       "broken",
+		"install_mode": "standard",
+		"bundle_path":  filepath.Join(resp.Meta.ReportDir, "kigrepair-support-bundle.zip"),
+		"classification": map[string]any{
+			"primary_issue": map[string]any{"code": "service_binary_missing"},
+		},
+		"recommendation": map[string]any{
+			"primary_action": map[string]any{"code": "collect_bundle", "message": "Collect support bundle and escalate."},
+		},
+	}
+	view := BuildResultView(resp)
+	if view.Classification != "broken" {
+		t.Fatalf("health = %q", view.Classification)
+	}
+	if view.InstallMode != "standard" {
+		t.Fatalf("install mode = %q", view.InstallMode)
+	}
+	if view.PrimaryIssueCode != "service_binary_missing" {
+		t.Fatalf("primary issue = %q", view.PrimaryIssueCode)
+	}
+	if view.Recommendation != "Collect support bundle and escalate." {
+		t.Fatalf("recommendation = %q", view.Recommendation)
+	}
+	if !strings.HasSuffix(view.SupportBundlePath, "kigrepair-support-bundle.zip") {
+		t.Fatalf("support bundle path = %q", view.SupportBundlePath)
+	}
+}
+
+func TestTimelineRenderingIncludesDurationAndFailureCategory(t *testing.T) {
+	text := FormatTimeline([]TimelineItem{{
+		Step:            "op-001-validate",
+		Status:          string(app.OperationStatusFailed),
+		Message:         "Installer validation failed",
+		DurationMS:      421,
+		FailureCategory: "installer",
+	}})
+	if !strings.Contains(text, "421 ms") || !strings.Contains(text, "installer") {
+		t.Fatalf("timeline missing support details: %s", text)
+	}
+}
+
 func TestRealRepairRequiresExactYES(t *testing.T) {
 	svc := &fakeService{}
 	controller := NewController(svc, func(context.Context, ConfirmationRequest) (bool, error) {

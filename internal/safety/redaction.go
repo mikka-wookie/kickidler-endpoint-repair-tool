@@ -1,6 +1,9 @@
 package safety
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 const RedactedValue = "<REDACTED>"
 
@@ -32,6 +35,18 @@ func RedactString(value string) string {
 		redacted = item.pattern.ReplaceAllString(redacted, item.replacement)
 	}
 	return redacted
+}
+
+func RedactStringWithSecrets(value string, secrets ...string) string {
+	redacted := value
+	for _, secret := range secrets {
+		secret = strings.TrimSpace(secret)
+		if secret == "" {
+			continue
+		}
+		redacted = strings.ReplaceAll(redacted, secret, RedactedValue)
+	}
+	return RedactString(redacted)
 }
 
 func RedactBytes(value []byte) []byte {

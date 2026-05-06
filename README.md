@@ -53,6 +53,9 @@ kigrepair-support-bundle.zip
 
 ## Support Documentation
 
+- [Step 40 Bug Triage](docs/BUG-TRIAGE.md)
+- [Stabilization Plan](docs/STABILIZATION-PLAN.md)
+- [UI MVP Spec](docs/UI-MVP-SPEC.md)
 - [Support KB](docs/SUPPORT-KB.md)
 - [Command Reference](docs/COMMAND-REFERENCE.md)
 - [Configuration](docs/CONFIGURATION.md)
@@ -70,6 +73,14 @@ kigrepair-support-bundle.zip
 - [Rollout](docs/ROLLOUT.md)
 - [Known Limitations](docs/KNOWN-LIMITATIONS.md)
 - [Short Support Runbook](SUPPORT-RUNBOOK.md)
+
+## GUI MVP
+
+`kigrepair-gui.exe` provides a single support dashboard for check, verify, collect bundle, preflight, repair dry-run, and real repair. It calls the internal workflow service directly, masks and clears invite input, and keeps real repair gated by administrator rights plus exact `YES` confirmation.
+
+```powershell
+.\kigrepair-gui.exe
+```
 
 ## MSI Assets
 
