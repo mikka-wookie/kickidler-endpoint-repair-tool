@@ -49,7 +49,7 @@ func TestRunCommandRedactsOutputAndInviteArgument(t *testing.T) {
 		SensitiveArgs: []string{invite},
 	})
 	joined := strings.Join([]string{strings.Join(result.Args, " "), result.CommandLine, result.Stdout, result.Stderr, result.Error}, "\n")
-	if strings.Contains(joined, invite) || strings.Contains(joined, "token=abc") {
+	if strings.Contains(joined, invite) || strings.Contains(joined, "token=abc") || strings.Contains(joined, "access_token=abc") || strings.Contains(joined, "refresh_token=def") || strings.Contains(joined, "Bearer abc123") || strings.Contains(joined, "password=my-password") {
 		t.Fatalf("result exposed sensitive value: %#v", result)
 	}
 	if !strings.Contains(result.CommandLine, "invite=<REDACTED>") {
@@ -89,7 +89,7 @@ func TestCommandHelperProcess(t *testing.T) {
 		os.Exit(7)
 	case "secret":
 		_, _ = os.Stdout.WriteString("invite=raw-secret-invite\n")
-		_, _ = os.Stderr.WriteString("token=abc\n")
+		_, _ = os.Stderr.WriteString("token=abc access_token=abc refresh_token=def Authorization: Bearer abc123 password=my-password\n")
 	case "env-secret":
 		_, _ = os.Stdout.WriteString(os.Getenv("KIGREPAIR_SECRET") + "\n")
 	}

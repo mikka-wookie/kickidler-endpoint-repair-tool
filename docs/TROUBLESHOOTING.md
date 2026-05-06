@@ -11,6 +11,16 @@ Config files must not contain `invite`, tokens, passwords, authorization headers
 
 Reports are written under `C:\ProgramData\kigrepair\Reports\<timestamp>\`. Attach `kigrepair-support-bundle.zip` when escalating.
 
+## Reading A Failed Run
+
+1. Open `summary.txt` and note the `Run ID`.
+2. Review `Workflow timeline` and find the first `failed` or `warning` operation ID.
+3. Open `operations.json` and search for that operation ID for structured status, failure category, result file, and redacted command details.
+4. Open `repair.log` and filter by the same `run_id` and `operation_id` for chronological JSONL events.
+5. Attach `kigrepair-support-bundle.zip` for escalation only after confirming no raw invite appears in reports.
+
+Logs and reports should redact invite, token, access token, refresh token, password, secret, and Authorization Bearer/Basic values. Use `<INVITE>` in notes and tickets.
+
 ## Command Safety Classes
 
 Read-only / non-destructive except report writing: `check`, `verify`, `preflight`, `repair --dry-run`, `cleanup --dry-run`, `collect-report`, `reports list`, `reports cleanup --dry-run`, `version`.

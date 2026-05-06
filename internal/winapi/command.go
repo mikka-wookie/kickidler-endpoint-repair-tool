@@ -39,16 +39,20 @@ type CommandOptions struct {
 }
 
 type CommandResult struct {
-	Name        string   `json:"name"`
-	Args        []string `json:"args,omitempty"`
-	CommandLine string   `json:"command_line,omitempty"`
-	ExitCode    int      `json:"exit_code"`
-	Stdout      string   `json:"stdout,omitempty"`
-	Stderr      string   `json:"stderr,omitempty"`
-	TimedOut    bool     `json:"timed_out"`
-	DurationMS  int64    `json:"duration_ms"`
-	Error       string   `json:"error,omitempty"`
-	Category    string   `json:"category,omitempty"`
+	Name            string   `json:"name"`
+	Args            []string `json:"args,omitempty"`
+	CommandLine     string   `json:"command_line,omitempty"`
+	TimeoutMS       int64    `json:"timeout_ms,omitempty"`
+	ExitCode        int      `json:"exit_code"`
+	Stdout          string   `json:"stdout,omitempty"`
+	Stderr          string   `json:"stderr,omitempty"`
+	StdoutSnippet   string   `json:"stdout_snippet,omitempty"`
+	StderrSnippet   string   `json:"stderr_snippet,omitempty"`
+	TimedOut        bool     `json:"timed_out"`
+	DurationMS      int64    `json:"duration_ms"`
+	Error           string   `json:"error,omitempty"`
+	Category        string   `json:"category,omitempty"`
+	FailureCategory string   `json:"failure_category,omitempty"`
 }
 
 func RunCommand(opts CommandOptions) CommandResult {
@@ -81,16 +85,20 @@ func RunCommand(opts CommandOptions) CommandResult {
 		Name:        opts.Name,
 		Args:        redactArgs(opts.Args, opts),
 		CommandLine: CommandLine(opts.Name, opts.Args, opts),
+		TimeoutMS:   timeout.Milliseconds(),
 		ExitCode:    0,
-		Stdout:      redactText(stdout.String(), opts),
-		Stderr:      redactText(stderr.String(), opts),
+		Stdout:      boundedSnippet(redactText(stdout.String(), opts), 4096),
+		Stderr:      boundedSnippet(redactText(stderr.String(), opts), 4096),
 		TimedOut:    ctx.Err() == context.DeadlineExceeded,
 		DurationMS:  time.Since(started).Milliseconds(),
 		Category:    category,
 	}
+	result.StdoutSnippet = boundedSnippet(result.Stdout, 512)
+	result.StderrSnippet = boundedSnippet(result.Stderr, 512)
 	if result.TimedOut {
 		result.ExitCode = -1
 		result.Category = failures.FailureExternalTimeout
+		result.FailureCategory = failures.FailureExternalTimeout
 		result.Error = fmt.Sprintf("command timed out after %s", timeout)
 		return result
 	}
@@ -101,6 +109,7 @@ func RunCommand(opts CommandOptions) CommandResult {
 			result.ExitCode = exitErr.ExitCode()
 		}
 		result.Error = safety.RedactString(err.Error())
+		result.FailureCategory = category
 	}
 	result.Stdout = strings.TrimSpace(result.Stdout)
 	result.Stderr = strings.TrimSpace(result.Stderr)
@@ -144,8 +153,11 @@ func isSensitiveArg(arg string, sensitive []string) bool {
 	lower := strings.ToLower(strings.TrimSpace(arg))
 	if strings.HasPrefix(lower, "invite=") ||
 		strings.HasPrefix(lower, "token=") ||
+		strings.HasPrefix(lower, "access_token=") ||
+		strings.HasPrefix(lower, "refresh_token=") ||
 		strings.HasPrefix(lower, "password=") ||
-		strings.HasPrefix(lower, "secret=") {
+		strings.HasPrefix(lower, "secret=") ||
+		strings.HasPrefix(lower, "authorization:") {
 		return true
 	}
 	for _, value := range sensitive {
@@ -155,6 +167,14 @@ func isSensitiveArg(arg string, sensitive []string) bool {
 		}
 	}
 	return false
+}
+
+func boundedSnippet(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	return value[:max] + "...<truncated>"
 }
 
 func redactSensitiveArg(arg string) string {

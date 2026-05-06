@@ -22,7 +22,17 @@ Do not paste real invite values into tickets, screenshots, or shared logs. `kigr
 
 ## Redaction
 
-Invite values are treated as sensitive and should be redacted from console output, logs, JSON reports, and support bundles. If a support engineer sees a raw invite in any report, do not attach that file until it is reviewed and sanitized.
+Invite values are treated as sensitive and should be redacted from console output, logs, JSON reports, and support bundles. Token, access token, refresh token, password, secret, and Authorization Bearer/Basic values are also redacted. If a support engineer sees a raw invite in any report, do not attach that file until it is reviewed and sanitized.
+
+## Run ID and Timeline
+
+Each workflow run gets a `Run ID` such as `kigrun-20260506-120000-a1b2c3`. Use it to link `summary.txt`, `operations.json`, `repair.log`, and result files from the same execution.
+
+`summary.txt` includes a compact workflow timeline with operation IDs, status, duration, and failure category when available. Start with the first `failed` or `warning` entry.
+
+`operations.json` is the structured timeline. Operation IDs use the format `op-001-detect`, `op-002-classify`, and so on.
+
+`repair.log` is JSON Lines. Each line is a redacted structured event with timestamp, level, run ID, workflow, optional operation ID, event name, status, category, duration, and extra fields.
 
 ## File Reference
 

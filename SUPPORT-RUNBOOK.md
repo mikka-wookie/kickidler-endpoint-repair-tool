@@ -27,6 +27,12 @@ Do not paste real invite values into tickets, screenshots, or shared logs. `kigr
 
 Failure-mode rule: if a command fails before making changes, review `summary.txt`, `operations.json`, and the first failed operation. Expected blockers should return `7`; warning or partial diagnostics should return `1`; unexpected tool/report infrastructure failures should return `10`.
 
+## Observability
+
+Use the `Run ID` in `summary.txt` to correlate `operations.json`, `repair.log`, and result files. `repair.log` is JSON Lines and is safe to parse or attach after confirming redaction. The `Workflow timeline` section in `summary.txt` is the quickest support-readable reconstruction of what happened.
+
+Reports and bundles should redact raw invite values and common secrets. If a raw invite appears, do not attach the file until it is sanitized.
+
 ## 1. Basic Triage
 
 ```powershell

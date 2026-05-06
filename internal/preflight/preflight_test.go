@@ -46,6 +46,7 @@ func (r *memoryReporter) Archive() (string, error) {
 
 type discardLogger struct{}
 
+func (discardLogger) Debug(string, ...any) {}
 func (discardLogger) Info(string, ...any)  {}
 func (discardLogger) Warn(string, ...any)  {}
 func (discardLogger) Error(string, ...any) {}

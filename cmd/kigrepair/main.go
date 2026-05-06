@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"kigrepair/internal/preflight"
 	"kigrepair/internal/repair"
 	"kigrepair/internal/reports"
+	"kigrepair/internal/safety"
 	"kigrepair/internal/verifier"
 	"kigrepair/internal/version"
 	"kigrepair/internal/winapi"
@@ -37,15 +39,16 @@ type globalOptions struct {
 	jsonOutput     bool
 	noElevate      bool
 	elevatedChild  bool
+	logLevel       string
 }
 
 func main() {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			if os.Getenv("KIGREPAIR_DEBUG") == "1" {
-				fmt.Fprintf(os.Stderr, "unexpected error: %v\n%s\n", recovered, debug.Stack())
+				fmt.Fprintf(os.Stderr, "unexpected error: %s\n%s\n", safety.RedactString(fmt.Sprint(recovered)), safety.RedactString(string(debug.Stack())))
 			} else {
-				fmt.Fprintf(os.Stderr, "unexpected error: %v\n", recovered)
+				fmt.Fprintf(os.Stderr, "unexpected error: %s\n", safety.RedactString(fmt.Sprint(recovered)))
 			}
 			os.Exit(app.ExitUnexpectedError)
 		}
@@ -65,6 +68,7 @@ func main() {
 	rootCmd.PersistentFlags().BoolVar(&opts.force, "force", false, "allow future privileged workflows to bypass confirmations")
 	rootCmd.PersistentFlags().BoolVar(&opts.jsonOutput, "json", false, "print command results as JSON")
 	rootCmd.PersistentFlags().BoolVar(&opts.noElevate, "no-elevate", false, "do not relaunch through UAC when administrator rights are required")
+	rootCmd.PersistentFlags().StringVar(&opts.logLevel, "log-level", "", "log level: debug, info, warning, or error")
 	rootCmd.PersistentFlags().BoolVar(&opts.elevatedChild, "elevated-child", false, "internal flag used after UAC relaunch")
 	_ = rootCmd.PersistentFlags().MarkHidden("elevated-child")
 
@@ -535,6 +539,7 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	}
 	ctx := app.NewContext()
 	ctx.StartedAt = time.Now()
+	ctx.Run.StartedAt = ctx.StartedAt
 	ctx.Config = effective.Config
 	ctx.ConfigMeta = effective.Metadata()
 	ctx.ReportRoot = reportRootFromEffectiveOptions(opts, effective)
@@ -542,6 +547,11 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	ctx.NonInteractive = opts.nonInteractive
 	ctx.Force = opts.force
 	ctx.JSONOutput = opts.jsonOutput
+	ctx.Run.CommandName = workflow.Name()
+	ctx.Run.WorkflowName = workflow.Name()
+	ctx.Run.ReportDir = ctx.OutputDir
+	ctx.Run.DryRun = workflowDryRun(workflow)
+	ctx.Run.ReadOnly = workflowReadOnly(workflow)
 	if opts.quiet {
 		ctx.Mode = app.RunModeQuiet
 	}
@@ -555,13 +565,24 @@ func runWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	if err != nil {
 		return err
 	}
+	reporter.Run = &ctx.Run
+	reporter.Results = &ctx.Results
 	ctx.Reporter = reporter
 	if err := ctx.Reporter.WriteJSON("config-metadata", ctx.ConfigMeta); err != nil {
 		return err
 	}
 
 	suppressConsoleLog := ctx.Quiet || ctx.JSONOutput || workflow.Name() == "verify" || workflow.Name() == "preflight"
-	logger, err := logging.New(reports.LogPath(ctx.OutputDir), suppressConsoleLog)
+	logLevel := effective.Config.Logging.Level
+	if strings.TrimSpace(opts.logLevel) != "" {
+		logLevel = opts.logLevel
+	}
+	logger, err := logging.NewWithOptions(reports.LogPath(ctx.OutputDir), logging.Options{
+		Quiet:    suppressConsoleLog,
+		Level:    logLevel,
+		RunID:    ctx.Run.RunID,
+		Workflow: ctx.Run.WorkflowName,
+	})
 	if err != nil {
 		return err
 	}
@@ -599,6 +620,7 @@ func runReportWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	}
 	ctx := app.NewContext()
 	ctx.StartedAt = time.Now()
+	ctx.Run.StartedAt = ctx.StartedAt
 	ctx.Config = effective.Config
 	ctx.ConfigMeta = effective.Metadata()
 	ctx.ReportRoot = reportRootFromEffectiveOptions(opts, effective)
@@ -607,6 +629,11 @@ func runReportWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	ctx.NonInteractive = opts.nonInteractive
 	ctx.Force = opts.force
 	ctx.JSONOutput = opts.jsonOutput
+	ctx.Run.CommandName = workflow.Name()
+	ctx.Run.WorkflowName = workflow.Name()
+	ctx.Run.ReportDir = ctx.OutputDir
+	ctx.Run.DryRun = workflowDryRun(workflow)
+	ctx.Run.ReadOnly = workflowReadOnly(workflow)
 	if opts.quiet {
 		ctx.Mode = app.RunModeQuiet
 	}
@@ -615,13 +642,24 @@ func runReportWorkflow(opts *globalOptions, workflow app.Workflow) error {
 	if err != nil {
 		return err
 	}
+	reporter.Run = &ctx.Run
+	reporter.Results = &ctx.Results
 	ctx.Reporter = reporter
 	if err := ctx.Reporter.WriteJSON("config-metadata", ctx.ConfigMeta); err != nil {
 		return err
 	}
 
 	suppressConsoleLog := ctx.Quiet || ctx.JSONOutput
-	logger, err := logging.New(reports.LogPath(ctx.OutputDir), suppressConsoleLog)
+	logLevel := effective.Config.Logging.Level
+	if strings.TrimSpace(opts.logLevel) != "" {
+		logLevel = opts.logLevel
+	}
+	logger, err := logging.NewWithOptions(reports.LogPath(ctx.OutputDir), logging.Options{
+		Quiet:    suppressConsoleLog,
+		Level:    logLevel,
+		RunID:    ctx.Run.RunID,
+		Workflow: ctx.Run.WorkflowName,
+	})
 	if err != nil {
 		return err
 	}
@@ -680,6 +718,12 @@ func loadEffectiveConfig(opts *globalOptions) (config.EffectiveConfig, error) {
 	if opts.quiet {
 		effective.Config.Logging.Console = false
 	}
+	if strings.TrimSpace(opts.logLevel) != "" {
+		if _, err := logging.ParseLevel(opts.logLevel); err != nil {
+			return effective, err
+		}
+		effective.Config.Logging.Level = opts.logLevel
+	}
 	return effective, nil
 }
 
@@ -702,4 +746,32 @@ func uniqueTimestampedReportDir(root string, startedAt time.Time) string {
 		}
 	}
 	return fmt.Sprintf("%s-%d", base, startedAt.UnixNano())
+}
+
+func workflowDryRun(workflow app.Workflow) bool {
+	if strings.Contains(strings.ToLower(workflow.Name()), "dry-run") {
+		return true
+	}
+	value := reflect.Indirect(reflect.ValueOf(workflow))
+	if value.IsValid() && value.Kind() == reflect.Struct {
+		field := value.FieldByName("DryRun")
+		return field.IsValid() && field.Kind() == reflect.Bool && field.Bool()
+	}
+	return false
+}
+
+func workflowReadOnly(workflow app.Workflow) bool {
+	name := strings.ToLower(workflow.Name())
+	if workflowDryRun(workflow) || name == "check" || name == "verify" || name == "preflight" || name == "collect-report" {
+		return true
+	}
+	if name == "defender" {
+		value := reflect.Indirect(reflect.ValueOf(workflow))
+		if value.IsValid() && value.Kind() == reflect.Struct {
+			field := value.FieldByName("Ensure")
+			return !(field.IsValid() && field.Kind() == reflect.Bool && field.Bool())
+		}
+		return true
+	}
+	return false
 }

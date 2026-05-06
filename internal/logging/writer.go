@@ -13,7 +13,11 @@ func NewWriter(logger *Logger, level string) io.Writer {
 
 func (w *Writer) Write(p []byte) (int, error) {
 	if w.logger != nil {
-		w.logger.write(w.level, "%s", string(p))
+		level, err := ParseLevel(w.level)
+		if err != nil {
+			level = LevelInfo
+		}
+		w.logger.write(level, "writer", "%s", string(p))
 	}
 	return len(p), nil
 }

@@ -10,6 +10,12 @@ Use `--config "C:\Path\kigrepair.yaml"` to load optional support defaults. CLI f
 
 Failure handling: read-only commands should continue with warnings when service, process, registry, or Defender queries are partially unavailable. Mutating commands should stop before mutation when critical prerequisites fail, including report directory creation, required rollback snapshot writing, missing invite, missing installer, invalid installer, missing admin rights, or missing confirmation. External command details are redacted in logs and reports.
 
+Global observability flags:
+
+- `--log-level debug|info|warning|error`: controls `repair.log` event level. Default is `info`.
+
+Workflow reports include a Run ID, operation IDs, a support-readable timeline in `summary.txt`, structured operation records in `operations.json`, and redacted JSONL events in `repair.log`.
+
 ## Command Safety Classes
 
 Read-only / non-destructive except report writing:

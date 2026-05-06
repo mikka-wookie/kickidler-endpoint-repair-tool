@@ -3,11 +3,19 @@ package app
 import "kigrepair/internal/failures"
 
 func RunWorkflow(ctx *AppContext, workflow Workflow) error {
+	ctx.Run.WorkflowName = workflow.Name()
+	ctx.Run.WorkflowID = ctx.Run.RunID + "-" + Slug(workflow.Name())
+	if ctx.Run.CommandName == "" {
+		ctx.Run.CommandName = workflow.Name()
+	}
+	ctx.Run.ReportDir = ctx.OutputDir
+	ctx.Run.UserInteractive = !ctx.Quiet && !ctx.NonInteractive
 	if ctx.Logger != nil {
 		ctx.Logger.Info("starting workflow: %s", workflow.Name())
 	}
 
 	err := workflow.Run(ctx)
+	ctx.FinishRun()
 	if ctx.Reporter != nil {
 		if writeErr := ctx.Reporter.WriteOperations(ctx.Results); writeErr != nil && err == nil {
 			ctx.AddResult(OperationResult{
