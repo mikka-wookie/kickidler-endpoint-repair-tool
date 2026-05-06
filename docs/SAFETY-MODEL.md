@@ -99,9 +99,15 @@ MSI validation runs before destructive repair or install. Invalid, missing, unre
 
 External commands are expected to run through the shared command runner with a timeout, exit code, redacted stdout/stderr, and support-readable failure category. Runtime defaults include 30 seconds for PowerShell metadata/Defender queries, 10 seconds for service queries, 30 seconds for service stop, 10 seconds for process termination, 10 minutes for MSI install/uninstall, and 2 minutes for support bundle creation.
 
+Observability must not change command safety. Read-only workflows may add report files and structured log events, but they must not mutate services, processes, files, registry, Defender exclusions, MSI state, or report retention state.
+
+Every workflow run should have a Run ID in `summary.txt`, `operations.json`, and `repair.log`. Operation records include sequential operation IDs, timestamps, duration, status, category, failure category when applicable, dry-run/read-only flags, and redacted command metadata when available.
+
+`repair.log` is structured JSON Lines and is always redacted, including debug-level output.
+
 Critical pre-mutation report files must be writable before mutation starts. If report directory creation fails, the command should exit `10` and make no system changes. If rollback snapshot creation or writing fails, repair, cleanup, install, and Defender ensure should stop before making changes.
 
-Panic recovery exists at the CLI command boundary. The user sees a minimal unexpected-error message and exit `10`; stack traces are printed only when `KIGREPAIR_DEBUG=1`.
+Panic recovery exists at the CLI command boundary. The user sees a minimal redacted unexpected-error message and exit `10`; redacted stack traces are printed only when `KIGREPAIR_DEBUG=1`.
 
 ## Rollback and audit
 

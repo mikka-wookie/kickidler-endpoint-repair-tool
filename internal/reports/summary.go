@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"kigrepair/internal/app"
+	"kigrepair/internal/safety"
 )
 
 type SummaryData struct {
@@ -21,6 +24,8 @@ type SummaryData struct {
 	Warnings       []string
 	Errors         []string
 	Actions        []string
+	Run            app.RunMetadata
+	Operations     []app.OperationResult
 }
 
 func FormatSummary(data SummaryData, details string) string {
@@ -29,6 +34,11 @@ func FormatSummary(data SummaryData, details string) string {
 		finished = time.Now()
 	}
 	var b strings.Builder
+	if data.Run.RunID != "" {
+		b.WriteString("Run ID: " + data.Run.RunID + "\n")
+		b.WriteString("Correlation ID: " + valueOrDash(data.Run.CorrelationID) + "\n")
+		b.WriteString("Workflow: " + valueOrDash(data.Run.WorkflowName) + "\n")
+	}
 	b.WriteString("Command: " + valueOrDash(data.Command) + "\n")
 	b.WriteString("Started: " + formatTime(data.Started) + "\n")
 	b.WriteString("Finished: " + formatTime(finished) + "\n")
@@ -49,13 +59,14 @@ func FormatSummary(data SummaryData, details string) string {
 	writeList(&b, "Warnings", data.Warnings)
 	writeList(&b, "Errors", data.Errors)
 	writeList(&b, "Main actions/results", data.Actions)
+	writeTimeline(&b, data.Operations)
 	if strings.TrimSpace(details) != "" {
-		b.WriteString(details)
+		b.WriteString(safety.RedactString(details))
 		if !strings.HasSuffix(details, "\n") {
 			b.WriteString("\n")
 		}
 	}
-	return b.String()
+	return safety.RedactString(b.String())
 }
 
 func formatTime(value time.Time) string {
@@ -83,6 +94,39 @@ func writeList(b *strings.Builder, name string, values []string) {
 		b.WriteString("- " + value + "\n")
 	}
 	b.WriteString("\n")
+}
+
+func writeTimeline(b *strings.Builder, operations []app.OperationResult) {
+	if len(operations) == 0 {
+		return
+	}
+	b.WriteString(FormatOperationTimeline(operations))
+}
+
+func FormatOperationTimeline(operations []app.OperationResult) string {
+	var b strings.Builder
+	b.WriteString("Workflow timeline:\n")
+	for i, operation := range operations {
+		id := valueOrDash(operation.ID)
+		status := valueOrDash(string(operation.Status))
+		message := valueOrDash(operation.Message)
+		duration := operation.DurationMS
+		if duration < 0 {
+			duration = 0
+		}
+		line := fmt.Sprintf("%d. [%s] %s: %s in %d ms", i+1, status, id, message, duration)
+		if operation.FailureCategory != "" && operation.Status == app.OperationStatusFailed {
+			line += " (failure: " + operation.FailureCategory + ")"
+		}
+		if operation.ResultFile != "" {
+			line += " -> " + operation.ResultFile
+		} else if operation.Artifact != "" {
+			line += " -> " + operation.Artifact
+		}
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("\n")
+	return safety.RedactString(b.String())
 }
 
 func valueOrDash(value string) string {

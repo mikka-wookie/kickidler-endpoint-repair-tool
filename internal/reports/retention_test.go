@@ -275,6 +275,7 @@ func makeReportDir(t *testing.T, root string, name string, files ...string) stri
 
 type retentionTestLogger struct{}
 
+func (retentionTestLogger) Debug(string, ...any) {}
 func (retentionTestLogger) Info(string, ...any)  {}
 func (retentionTestLogger) Warn(string, ...any)  {}
 func (retentionTestLogger) Error(string, ...any) {}
