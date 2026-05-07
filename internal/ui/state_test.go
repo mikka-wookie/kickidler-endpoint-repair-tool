@@ -180,6 +180,46 @@ func TestMapNotReadyRepairPlanToGUIState(t *testing.T) {
 	}
 }
 
+func TestGUIConsumesWorkflowOutcomeForPrimaryStatus(t *testing.T) {
+	resp := response("repair --dry-run", "failed")
+	resp.Result = map[string]any{"health": "wrong"}
+	resp.Warnings = []string{"raw warning that should not drive primary card"}
+	resp.Timeline = []app.OperationResult{{
+		Step:      "raw.step",
+		Status:    app.OperationStatusWarning,
+		Message:   "raw operation that should not be rendered",
+		Timestamp: time.Now(),
+	}}
+	resp.Outcome = &app.WorkflowOutcome{
+		RunID:           "run-outcome",
+		Workflow:        "repair --dry-run",
+		Status:          string(app.WorkflowStatusNotReady),
+		ExitCode:        app.ExitInvalidInput,
+		ReportDir:       resp.Meta.ReportDir,
+		Health:          "unknown",
+		InstallMode:     "unknown",
+		RepairReadiness: "not_ready",
+		PrimaryIssue:    &app.IssueSummary{Code: "partial_msi_leftovers", Title: "MSI registry leftovers found"},
+		Recommendation:  &app.ActionSummary{Code: "run_cleanup_dry_run", Title: "Run cleanup dry-run"},
+		BlockingReasons: []app.UserMessage{{Code: "admin_rights", Severity: "error", Title: "Administrator rights required", Message: "Restart the tool as Administrator to complete service, Defender, and repair checks."}},
+		Timeline:        []app.TimelineItem{{OperationID: "compact", Status: "warning", Message: "Additional details saved in operations.json.", DetailsRef: resp.Meta.OperationsFile}},
+		Files:           app.BuildResultFileSummary(resp.Meta.ReportDir, resp.Meta.PrimaryResultFile),
+	}
+	view := BuildResultView(resp)
+	if view.Status != "Not ready" || view.Classification != "unknown" || view.InstallMode != "unknown" {
+		t.Fatalf("view did not use outcome: %#v", view)
+	}
+	if view.PrimaryIssueCode != "partial_msi_leftovers" || view.RecommendationCode != "run_cleanup_dry_run" {
+		t.Fatalf("support summaries not mapped from outcome: %#v", view)
+	}
+	if len(view.Timeline) != 1 || view.Timeline[0].Step != "compact" {
+		t.Fatalf("GUI rendered raw timeline instead of compact outcome: %#v", view.Timeline)
+	}
+	if view.OperationsFile == "" || view.PrimaryResultFile == "" {
+		t.Fatalf("file references missing: %#v", view)
+	}
+}
+
 func TestWarningAggregationCollapsesProcessFlood(t *testing.T) {
 	var warnings []string
 	for i := 0; i < 91; i++ {

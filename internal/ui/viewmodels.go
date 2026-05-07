@@ -15,6 +15,13 @@ func BuildResultView(resp *app.WorkflowResponse) ResultView {
 	if resp == nil {
 		return ResultView{Status: string(app.WorkflowStatusFailed), Errors: []string{"workflow returned no response"}}
 	}
+	if resp.Outcome != nil {
+		view := resultViewFromOutcome(*resp.Outcome)
+		if view.SupportBundlePath == "" && view.ReportDir != "" && resp.Meta.Workflow == "collect-report" {
+			view.SupportBundlePath = filepath.Join(view.ReportDir, "kigrepair-support-bundle.zip")
+		}
+		return view
+	}
 	state := MapWorkflowResponseToGUIState(resp)
 	view := resultViewFromGUIState(state)
 	view.Errors = redactSlice(resp.Errors)
@@ -56,6 +63,9 @@ func MapWorkflowResponseToGUIState(resp *app.WorkflowResponse) GUIState {
 	if resp == nil {
 		return GUIState{CurrentStatus: "Failed", BlockingReasons: []string{"Workflow returned no response."}}
 	}
+	if resp.Outcome != nil {
+		return guiStateFromOutcome(*resp.Outcome)
+	}
 	state := GUIState{
 		CurrentWorkflow: resp.Meta.Workflow,
 		CurrentStatus:   supportStatus(resp.Meta.Status, resp.Result, resp.Errors),
@@ -80,6 +90,64 @@ func MapWorkflowResponseToGUIState(resp *app.WorkflowResponse) GUIState {
 	if state.Files.SupportBundlePath == "" && state.Files.ReportDir != "" && resp.Meta.Workflow == "collect-report" {
 		state.Files.SupportBundlePath = filepath.Join(state.Files.ReportDir, "kigrepair-support-bundle.zip")
 	}
+	return state
+}
+
+func resultViewFromOutcome(out app.WorkflowOutcome) ResultView {
+	state := guiStateFromOutcome(out)
+	view := resultViewFromGUIState(state)
+	view.Errors = messagesToStrings(out.Errors)
+	view.Reports = append([]string(nil), out.ReportDir)
+	for _, item := range out.Timeline {
+		view.Timeline = append(view.Timeline, TimelineItem{
+			Stage:           "operation",
+			Step:            safety.RedactString(item.OperationID),
+			Status:          item.Status,
+			Message:         safety.RedactString(item.Message),
+			DurationMS:      item.DurationMS,
+			FailureCategory: safety.RedactString(item.FailureCategory),
+			DetailsFile:     safety.RedactString(item.DetailsRef),
+		})
+	}
+	return view
+}
+
+func guiStateFromOutcome(out app.WorkflowOutcome) GUIState {
+	state := GUIState{
+		CurrentWorkflow:     out.Workflow,
+		CurrentStatus:       supportStatus(out.Status, nil, nil),
+		LatestRunID:         out.RunID,
+		LatestReportDir:     out.ReportDir,
+		Health:              out.Health,
+		InstallMode:         out.InstallMode,
+		BlockingReasons:     messagesToStrings(out.BlockingReasons),
+		Warnings:            messagesToStrings(out.Warnings),
+		IsAdmin:             out.Admin.IsAdmin,
+		PrimaryIssueCode:    "",
+		PrimaryIssueTitle:   "",
+		RecommendationCode:  "",
+		RecommendationTitle: "",
+		Files: ResultFiles{
+			ReportDir:         firstNonEmptyString(out.Files.ReportDir, out.ReportDir),
+			SummaryFile:       firstNonEmptyString(out.Files.Summary, out.SummaryFile),
+			OperationsFile:    firstNonEmptyString(out.Files.Operations, out.OperationsFile),
+			PrimaryResultFile: firstNonEmptyString(out.Files.PrimaryResult, out.PrimaryResultFile),
+			CleanupPlanFile:   out.Files.CleanupPlan,
+			SupportBundlePath: out.Files.SupportBundle,
+		},
+	}
+	if out.PrimaryIssue != nil {
+		state.PrimaryIssueCode = out.PrimaryIssue.Code
+		state.PrimaryIssueTitle = firstNonEmptyString(out.PrimaryIssue.Title, out.PrimaryIssue.Message)
+	}
+	if out.Recommendation != nil {
+		state.RecommendationCode = out.Recommendation.Code
+		state.RecommendationTitle = firstNonEmptyString(out.Recommendation.Title, out.Recommendation.Description)
+	}
+	if out.Status == string(app.WorkflowStatusNotReady) || out.RepairReadiness == "not_ready" {
+		state.CurrentStatus = "Not ready"
+	}
+	normalizeSupportState(&state)
 	return state
 }
 
@@ -484,6 +552,8 @@ func supportStatus(status string, result any, errors []string) string {
 		return "Success"
 	case "warning":
 		return "Warning"
+	case "not_ready", "not ready":
+		return "Not ready"
 	case "failed":
 		if len(errors) > 0 && hasNotReadyError(errors) {
 			return "Not ready"
@@ -713,6 +783,20 @@ func redactSlice(values []string) []string {
 		out = append(out, safety.RedactString(value))
 	}
 	return out
+}
+
+func messagesToStrings(values []app.UserMessage) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		text := strings.TrimSpace(firstNonEmptyString(value.Title, value.Message))
+		if value.Message != "" && value.Message != text {
+			text = strings.TrimSpace(text + ": " + value.Message)
+		}
+		if text != "" {
+			out = append(out, safety.RedactString(text))
+		}
+	}
+	return dedupeStrings(out)
 }
 
 func emptyAs(value string, fallback string) string {

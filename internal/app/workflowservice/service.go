@@ -321,6 +321,20 @@ func (s *Service) finish(runCtx *app.AppContext, resp *app.WorkflowResponse, pri
 		resp.Errors = append(resp.Errors, runCtx.RedactString(err.Error()))
 	}
 	redactResponse(runCtx, resp)
+	outcome := app.BuildWorkflowOutcome(app.OutcomeInput{
+		Meta:     resp.Meta,
+		Result:   resp.Result,
+		Warnings: resp.Warnings,
+		Errors:   resp.Errors,
+		Timeline: resp.Timeline,
+		Policy:   resp.Policy,
+		Err:      sanitizeErr(runCtx, err),
+	})
+	if priorStatus == string(app.WorkflowStatusCancelled) {
+		outcome.Status = priorStatus
+	}
+	resp.Outcome = &outcome
+	resp.Meta.Status = outcome.Status
 	return resp, sanitizeErr(runCtx, err)
 }
 
@@ -354,16 +368,7 @@ func metaFromContext(ctx *app.AppContext, primary string) app.WorkflowResponseMe
 }
 
 func workflowStatus(exitCode int, err error) string {
-	if errors.Is(err, context.Canceled) {
-		return string(app.WorkflowStatusCancelled)
-	}
-	if err != nil || exitCode >= app.ExitInvalidInput {
-		return string(app.WorkflowStatusFailed)
-	}
-	if exitCode == app.ExitWarnings {
-		return string(app.WorkflowStatusWarning)
-	}
-	return string(app.WorkflowStatusSuccess)
+	return app.WorkflowStatusForExit(exitCode, err, false)
 }
 
 func optionalFile(dir string, name string) string {
