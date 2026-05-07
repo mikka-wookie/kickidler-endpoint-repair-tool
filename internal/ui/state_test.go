@@ -114,9 +114,77 @@ func TestBuildResultViewExtractsSupportFields(t *testing.T) {
 	if view.Recommendation != "Collect support bundle and escalate." {
 		t.Fatalf("recommendation = %q", view.Recommendation)
 	}
+	if view.RecommendationCode != "collect_bundle" {
+		t.Fatalf("recommendation code = %q", view.RecommendationCode)
+	}
 	if !strings.HasSuffix(view.SupportBundlePath, "kigrepair-support-bundle.zip") {
 		t.Fatalf("support bundle path = %q", view.SupportBundlePath)
 	}
+}
+
+func TestMapNotReadyRepairPlanToGUIState(t *testing.T) {
+	resp := response("repair --dry-run", "warning")
+	resp.Result = map[string]any{
+		"repair_plan": map[string]any{
+			"status":           "not_ready",
+			"ready_for_repair": false,
+			"detection_health": "unknown",
+			"install_mode":     "unknown",
+			"classification": map[string]any{
+				"primary_issue": map[string]any{"code": "partial_msi_leftovers", "title": "Partial MSI leftovers"},
+			},
+			"recommendation": map[string]any{
+				"primary_action": map[string]any{"code": "cleanup_dry_run", "message": "Run cleanup dry-run"},
+			},
+			"preflight": map[string]any{
+				"checks": []any{
+					map[string]any{"name": "admin_rights", "status": "failed", "required": true},
+					map[string]any{"name": "installer_available", "status": "failed", "required": true},
+				},
+			},
+		},
+	}
+	state := MapWorkflowResponseToGUIState(resp)
+	if state.CurrentStatus != "Not ready" {
+		t.Fatalf("status = %q", state.CurrentStatus)
+	}
+	if state.PrimaryIssueCode != "partial_msi_leftovers" {
+		t.Fatalf("primary issue = %q", state.PrimaryIssueCode)
+	}
+	if state.RecommendationTitle != "Run cleanup dry-run" {
+		t.Fatalf("recommendation = %q", state.RecommendationTitle)
+	}
+	if !contains(state.BlockingReasons, "Administrator rights required.") || !contains(state.BlockingReasons, "Installer file was not found.") {
+		t.Fatalf("blocking reasons = %#v", state.BlockingReasons)
+	}
+	if state.Files.ReportDir == "" {
+		t.Fatal("report dir was not mapped")
+	}
+}
+
+func TestWarningAggregationCollapsesProcessFlood(t *testing.T) {
+	var warnings []string
+	for i := 0; i < 91; i++ {
+		warnings = append(warnings, "Skipped unsafe process match")
+	}
+	items := AggregateTimelineWarnings(nil, warnings, "cleanup-plan.json")
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	if !strings.Contains(items[0].Message, "91") || items[0].DetailsFile != "cleanup-plan.json" {
+		t.Fatalf("aggregate item = %#v", items[0])
+	}
+}
+
+func TestInviteNotStoredInGUIStateOrTimeline(t *testing.T) {
+	resp := responseWithTimeline("repair --dry-run", "invite="+testInvite)
+	resp.Warnings = []string{"warning invite=" + testInvite}
+	resp.Errors = []string{"error invite=" + testInvite}
+	resp.Result = map[string]any{"errors": []any{"result invite=" + testInvite}}
+	view := BuildResultView(resp)
+	assertNoInvite(t, view)
+	state := MapWorkflowResponseToGUIState(resp)
+	assertNoInvite(t, state)
 }
 
 func TestTimelineRenderingIncludesDurationAndFailureCategory(t *testing.T) {
@@ -144,6 +212,14 @@ func TestRealRepairRequiresExactYES(t *testing.T) {
 	}
 	if len(svc.called) != 0 {
 		t.Fatalf("repair workflow was called without exact YES: %#v", svc.called)
+	}
+}
+
+func TestRealRepairConfirmationRejectsCancelAndWhitespace(t *testing.T) {
+	for _, input := range []string{"", " YES", "YES ", "Yes"} {
+		if AcceptExactYES(input) {
+			t.Fatalf("confirmation accepted %q", input)
+		}
 	}
 }
 
@@ -183,6 +259,24 @@ func TestOnlyOneWorkflowCanRunAtATimeAndCancelUsesContext(t *testing.T) {
 	err := <-errCh
 	if !errors.Is(err, context.Canceled) && (err == nil || !strings.Contains(err.Error(), "canceled")) {
 		t.Fatalf("expected context cancellation, got %v", err)
+	}
+}
+
+func TestButtonStateWhileRunning(t *testing.T) {
+	running := ComputeButtonState(true)
+	if running.ActionsEnabled || !running.CancelEnabled {
+		t.Fatalf("running button state = %#v", running)
+	}
+	idle := ComputeButtonState(false)
+	if !idle.ActionsEnabled || idle.CancelEnabled {
+		t.Fatalf("idle button state = %#v", idle)
+	}
+}
+
+func TestOpenPathMissingFileReturnsSafeError(t *testing.T) {
+	err := OpenPath(filepath.Join(t.TempDir(), "missing-summary.txt"))
+	if err == nil {
+		t.Fatal("expected missing file error")
 	}
 }
 
@@ -258,6 +352,15 @@ func assertNoInvite(t *testing.T, value any) {
 	if strings.Contains(string(data), testInvite) {
 		t.Fatalf("invite leaked: %s", data)
 	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func assertNoImportPrefix(t *testing.T, dir string, forbidden string) {

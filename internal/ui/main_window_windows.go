@@ -5,6 +5,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -27,6 +28,7 @@ const (
 	wmAppDone = 0x8001
 
 	bsPushButton  = 0x00000000
+	bsGroupBox    = 0x00000007
 	esAutoHScroll = 0x0080
 	esMultiLine   = 0x0004
 	esReadOnly    = 0x0800
@@ -65,33 +67,44 @@ const (
 	idInvite
 	idProfile
 	idTimeline
+	idHeader
+	idSystem
 	idSummary
 	idReports
+	idCopyReportPath
+	idOpenOperations
 )
 
 var (
-	user32              = windows.NewLazySystemDLL("user32.dll")
-	kernel32            = windows.NewLazySystemDLL("kernel32.dll")
-	comdlg32            = windows.NewLazySystemDLL("comdlg32.dll")
-	procRegisterClassEx = user32.NewProc("RegisterClassExW")
-	procCreateWindowEx  = user32.NewProc("CreateWindowExW")
-	procDefWindowProc   = user32.NewProc("DefWindowProcW")
-	procShowWindow      = user32.NewProc("ShowWindow")
-	procUpdateWindow    = user32.NewProc("UpdateWindow")
-	procGetMessage      = user32.NewProc("GetMessageW")
-	procTranslateMsg    = user32.NewProc("TranslateMessage")
-	procDispatchMsg     = user32.NewProc("DispatchMessageW")
-	procPostQuitMessage = user32.NewProc("PostQuitMessage")
-	procSetWindowText   = user32.NewProc("SetWindowTextW")
-	procGetWindowText   = user32.NewProc("GetWindowTextW")
-	procEnableWindow    = user32.NewProc("EnableWindow")
-	procMessageBox      = user32.NewProc("MessageBoxW")
-	procSendMessage     = user32.NewProc("SendMessageW")
-	procSetTimer        = user32.NewProc("SetTimer")
-	procKillTimer       = user32.NewProc("KillTimer")
-	procPostMessage     = user32.NewProc("PostMessageW")
-	procGetModuleHandle = kernel32.NewProc("GetModuleHandleW")
-	procGetOpenFileName = comdlg32.NewProc("GetOpenFileNameW")
+	user32               = windows.NewLazySystemDLL("user32.dll")
+	kernel32             = windows.NewLazySystemDLL("kernel32.dll")
+	comdlg32             = windows.NewLazySystemDLL("comdlg32.dll")
+	procRegisterClassEx  = user32.NewProc("RegisterClassExW")
+	procCreateWindowEx   = user32.NewProc("CreateWindowExW")
+	procDefWindowProc    = user32.NewProc("DefWindowProcW")
+	procShowWindow       = user32.NewProc("ShowWindow")
+	procUpdateWindow     = user32.NewProc("UpdateWindow")
+	procGetMessage       = user32.NewProc("GetMessageW")
+	procTranslateMsg     = user32.NewProc("TranslateMessage")
+	procDispatchMsg      = user32.NewProc("DispatchMessageW")
+	procPostQuitMessage  = user32.NewProc("PostQuitMessage")
+	procSetWindowText    = user32.NewProc("SetWindowTextW")
+	procGetWindowText    = user32.NewProc("GetWindowTextW")
+	procEnableWindow     = user32.NewProc("EnableWindow")
+	procMessageBox       = user32.NewProc("MessageBoxW")
+	procSendMessage      = user32.NewProc("SendMessageW")
+	procSetTimer         = user32.NewProc("SetTimer")
+	procKillTimer        = user32.NewProc("KillTimer")
+	procPostMessage      = user32.NewProc("PostMessageW")
+	procOpenClipboard    = user32.NewProc("OpenClipboard")
+	procEmptyClipboard   = user32.NewProc("EmptyClipboard")
+	procSetClipboardData = user32.NewProc("SetClipboardData")
+	procCloseClipboard   = user32.NewProc("CloseClipboard")
+	procGetModuleHandle  = kernel32.NewProc("GetModuleHandleW")
+	procGlobalAlloc      = kernel32.NewProc("GlobalAlloc")
+	procGlobalLock       = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock     = kernel32.NewProc("GlobalUnlock")
+	procGetOpenFileName  = comdlg32.NewProc("GetOpenFileNameW")
 )
 
 type mainWindow struct {
@@ -169,39 +182,50 @@ func (w *mainWindow) run() error {
 }
 
 func (w *mainWindow) createControls() {
-	createStatic(w.hwnd, "Header", 16, 12, 220, 22)
-	w.controls[idSummary] = createEdit(w.hwnd, "", 16, 38, 930, 108, esMultiLine|esReadOnly|wsVScroll)
+	w.controls[idHeader] = createEdit(w.hwnd, "", 16, 12, 948, 70, esMultiLine|esReadOnly)
 
-	createStatic(w.hwnd, "Quick Actions", 16, 158, 220, 22)
-	createButton(w, idCheck, "Check", 16, 184, 95, 30)
-	createButton(w, idVerify, "Verify", 118, 184, 95, 30)
-	createButton(w, idCollect, "Collect Bundle", 220, 184, 125, 30)
-	createButton(w, idOpenReports, "Open Reports Folder", 352, 184, 160, 30)
-	createButton(w, idRestartAdmin, "Restart as Administrator", 520, 184, 180, 30)
-	createButton(w, idCancel, "Cancel", 708, 184, 90, 30)
+	createGroup(w.hwnd, "System Status", 16, 92, 948, 128)
+	w.controls[idSystem] = createEdit(w.hwnd, "", 32, 118, 916, 86, esMultiLine|esReadOnly|wsVScroll)
 
-	createStatic(w.hwnd, "Repair Preparation", 16, 228, 220, 22)
-	createStatic(w.hwnd, "Installer:", 16, 258, 70, 22)
-	w.controls[idInstaller] = createEdit(w.hwnd, "", 88, 256, 560, 24, esAutoHScroll)
-	createButton(w, idBrowseInstaller, "Browse", 656, 254, 90, 28)
-	createStatic(w.hwnd, "Invite:", 16, 290, 70, 22)
-	w.controls[idInvite] = createEdit(w.hwnd, "", 88, 288, 300, 24, esAutoHScroll|esPassword)
-	createStatic(w.hwnd, "Profile:", 408, 290, 70, 22)
-	w.controls[idProfile] = createEdit(w.hwnd, emptyAs(w.activeProfile, "standard"), 480, 288, 130, 24, esAutoHScroll)
-	createStatic(w.hwnd, "standard / conservative / diagnostic", 620, 290, 250, 22)
-	createButton(w, idPreflight, "Preflight", 16, 326, 100, 30)
-	createButton(w, idRepairDryRun, "Repair Dry-Run", 124, 326, 130, 30)
-	createButton(w, idRepair, "RUN REAL REPAIR", 304, 322, 170, 38)
+	createGroup(w.hwnd, "Quick Actions", 16, 230, 948, 70)
+	createButton(w, idCheck, "Check", 32, 256, 95, 30)
+	createButton(w, idVerify, "Verify", 134, 256, 95, 30)
+	createButton(w, idCollect, "Collect Bundle", 236, 256, 125, 30)
+	createButton(w, idOpenReports, "Open Reports Folder", 368, 256, 160, 30)
+	createButton(w, idRestartAdmin, "Restart as Administrator", 536, 256, 180, 30)
+	createButton(w, idCancel, "Cancel", 724, 256, 90, 30)
 
-	createStatic(w.hwnd, "Timeline", 16, 378, 220, 22)
-	w.controls[idTimeline] = createEdit(w.hwnd, "", 16, 404, 930, 170, esMultiLine|esReadOnly|wsVScroll)
+	createGroup(w.hwnd, "Repair Preparation", 16, 310, 620, 140)
+	createStatic(w.hwnd, "Installer:", 32, 338, 70, 22)
+	w.controls[idInstaller] = createEdit(w.hwnd, "", 104, 336, 410, 24, esAutoHScroll)
+	createButton(w, idBrowseInstaller, "Browse", 522, 334, 90, 28)
+	createStatic(w.hwnd, "Invite:", 32, 370, 70, 22)
+	w.controls[idInvite] = createEdit(w.hwnd, "", 104, 368, 250, 24, esAutoHScroll|esPassword)
+	createStatic(w.hwnd, "Profile:", 370, 370, 70, 22)
+	w.controls[idProfile] = createEdit(w.hwnd, emptyAs(w.activeProfile, "standard"), 438, 368, 120, 24, esAutoHScroll)
+	createStatic(w.hwnd, "standard / conservative / diagnostic", 104, 398, 300, 22)
+	createButton(w, idPreflight, "Preflight", 32, 414, 100, 28)
+	createButton(w, idRepairDryRun, "Repair Dry-Run", 140, 414, 130, 28)
 
-	createStatic(w.hwnd, "Details", 16, 588, 220, 22)
-	w.controls[idReports] = createEdit(w.hwnd, "", 16, 614, 610, 58, esMultiLine|esReadOnly|wsVScroll)
-	createButton(w, idOpenSelectedReport, "Open Summary", 642, 614, 130, 30)
-	createButton(w, idReportsList, "Reports List", 780, 614, 110, 30)
-	createButton(w, idReportsCleanupDry, "Cleanup Dry-Run", 642, 650, 140, 28)
+	createGroup(w.hwnd, "Danger Zone", 650, 310, 314, 140)
+	createStatic(w.hwnd, "Real repair can stop services, remove validated leftovers,", 666, 338, 280, 18)
+	createStatic(w.hwnd, "add Defender exclusions, and reinstall Grabber.", 666, 356, 280, 18)
+	createButton(w, idRepair, "RUN REAL REPAIR", 666, 392, 170, 38)
+
+	createGroup(w.hwnd, "Timeline", 16, 460, 948, 146)
+	w.controls[idTimeline] = createEdit(w.hwnd, "", 32, 486, 916, 104, esMultiLine|esReadOnly|wsVScroll)
+
+	createGroup(w.hwnd, "Details", 16, 616, 948, 82)
+	w.controls[idReports] = createEdit(w.hwnd, "", 32, 642, 540, 40, esMultiLine|esReadOnly|wsVScroll)
+	createButton(w, idOpenSelectedReport, "Open Summary", 588, 642, 120, 28)
+	createButton(w, idOpenOperations, "Open Operations", 714, 642, 126, 28)
+	createButton(w, idCopyReportPath, "Copy Report Path", 846, 642, 102, 28)
+	createButton(w, idReportsList, "Reports List", 588, 672, 110, 24)
+	createButton(w, idReportsCleanupDry, "Cleanup Dry-Run", 704, 672, 140, 24)
 	enable(w.controls[idCancel], false)
+	if w.admin {
+		enable(w.controls[idRestartAdmin], false)
+	}
 }
 
 func (w *mainWindow) windowProc(hwnd uintptr, msgID uint32, wparam uintptr, lparam uintptr) uintptr {
@@ -245,11 +269,20 @@ func (w *mainWindow) handleCommand(id int) {
 			w.showError("Administrator rights are required for real repair. Use Restart as Administrator, then run Real Repair again.")
 			return
 		}
+		if strings.TrimSpace(getText(w.controls[idInstaller])) == "" {
+			w.showError("Installer file was not found. Select a supported MSI before real repair.")
+			return
+		}
+		if strings.TrimSpace(getText(w.controls[idInvite])) == "" {
+			w.showError("Invite is required for this workflow.")
+			return
+		}
 		w.runAction(ActionRepair)
 	case idReportsCleanupDry:
 		w.runAction(ActionReportsCleanupDry)
 	case idCancel:
 		w.controller.Cancel()
+		setText(w.controls[idInvite], "")
 	case idOpenReports:
 		target := w.reportRoot
 		if strings.TrimSpace(target) == "" {
@@ -266,9 +299,27 @@ func (w *mainWindow) handleCommand(id int) {
 		if err := OpenPath(target); err != nil {
 			w.showError(err.Error())
 		}
+	case idOpenOperations:
+		target := filepathFromReport(w.latestReport, "operations.json")
+		if err := OpenPath(target); err != nil {
+			w.showError("Operations file is not available yet. Run Check or Verify first.")
+		}
+	case idCopyReportPath:
+		if strings.TrimSpace(w.latestReport) == "" {
+			w.showError("Report path is not available yet. Run Check or Verify first.")
+			return
+		}
+		if err := copyText(w.hwnd, w.latestReport); err != nil {
+			w.showError(err.Error())
+			return
+		}
+		messageBox(w.hwnd, "Report path copied.", "kigrepair GUI")
 	case idBrowseInstaller:
 		if path := openInstallerDialog(w.hwnd); path != "" {
 			setText(w.controls[idInstaller], path)
+			if warning := installerFilenameWarning(path); warning != "" {
+				w.showError(warning)
+			}
 		}
 	case idRestartAdmin:
 		if err := winapi.RelaunchElevated(nil); err != nil {
@@ -284,7 +335,7 @@ func (w *mainWindow) runAction(action Action) {
 		Profile:       getText(w.controls[idProfile]),
 	}
 	w.setRunningState(true)
-	setText(w.controls[idSummary], "Status: running\r\nWorkflow: "+string(action))
+	setText(w.controls[idHeader], "kigrepair\r\nKickidler Grabber Repair Utility\r\nStatus: Running "+string(action)+"...")
 	go func() {
 		_, err := w.controller.Run(context.Background(), action, inputs)
 		setText(w.controls[idInvite], "")
@@ -292,7 +343,8 @@ func (w *mainWindow) runAction(action Action) {
 			// The detailed, redacted error is also rendered from the controller result.
 			w.controller.mu.Lock()
 			latest := w.controller.latest
-			latest.Errors = append(latest.Errors, safety.RedactString(err.Error()))
+			latest.Errors = append(latest.Errors, readableBlocker(err.Error(), err.Error()))
+			latest.BlockingReasons = append(latest.BlockingReasons, readableBlocker(err.Error(), err.Error()))
 			w.controller.latest = latest
 			w.controller.mu.Unlock()
 		}
@@ -308,36 +360,44 @@ func (w *mainWindow) updateDashboard(view ResultView) {
 		w.latestSummary = view.SummaryFile
 	}
 	info := version.Get()
-	admin := "no"
-	if w.admin {
-		admin = "yes"
-	}
 	if view.Status == "" {
-		view.Status = "idle"
+		view.Status = "Idle"
 	}
-	prefix := []string{
-		"kigrepair support dashboard",
-		"Version: " + info.Version + "  Commit: " + info.Commit + "  Build: " + info.BuildDate,
-		"Profile: " + emptyAs(getText(w.controls[idProfile]), emptyAs(w.activeProfile, "standard")) + "  Admin: " + admin + "  Latest RunID: " + emptyAs(view.RunID, "not available"),
-		"Config: " + emptyAs(w.configSource, "defaults"),
+	adminBadge := "Limited mode"
+	if w.admin {
+		adminBadge = "Admin"
 	}
-	setText(w.controls[idSummary], strings.Join(prefix, "\r\n")+"\r\n"+FormatResultSummary(view))
+	header := []string{
+		"kigrepair                                      " + info.Version + " / " + emptyAs(info.Commit, "dev"),
+		"Kickidler Grabber Repair Utility",
+		"Profile: " + emptyAs(getText(w.controls[idProfile]), emptyAs(w.activeProfile, "standard")) + "     Admin: " + adminBadge + "     Status: " + view.Status,
+	}
+	if !w.admin {
+		header = append(header, "Limited mode: not running as Administrator. Service, Defender, and repair checks may be incomplete.")
+	}
+	setText(w.controls[idHeader], strings.Join(header, "\r\n"))
+	setText(w.controls[idSystem], FormatSystemStatus(view))
 	setText(w.controls[idTimeline], FormatTimeline(view.Timeline))
 	reportLines := []string{
 		"Latest report directory: " + emptyAs(view.ReportDir, "not available"),
 		"summary.txt: " + emptyAs(view.SummaryFile, "not available"),
 		"operations.json: " + emptyAs(view.OperationsFile, "not available"),
 		"primary result: " + emptyAs(view.PrimaryResultFile, "not available"),
+		"cleanup-plan.json: " + emptyAs(filepathFromReport(view.ReportDir, "cleanup-plan.json"), "not available"),
 		"support bundle: " + emptyAs(view.SupportBundlePath, "not available"),
 	}
 	setText(w.controls[idReports], strings.Join(reportLines, "\r\n"))
 }
 
 func (w *mainWindow) setRunningState(running bool) {
+	state := ComputeButtonState(running)
 	for _, id := range []int{idCheck, idVerify, idCollect, idReportsList, idPreflight, idRepairDryRun, idRepair, idReportsCleanupDry, idBrowseInstaller, idRestartAdmin} {
-		enable(w.controls[id], !running)
+		enable(w.controls[id], state.ActionsEnabled)
 	}
-	enable(w.controls[idCancel], running)
+	if w.admin {
+		enable(w.controls[idRestartAdmin], false)
+	}
+	enable(w.controls[idCancel], state.CancelEnabled)
 }
 
 func (w *mainWindow) confirm(ctx context.Context, req ConfirmationRequest) (bool, error) {
@@ -351,6 +411,10 @@ func (w *mainWindow) showError(message string) {
 
 func createButton(w *mainWindow, id int, text string, x, y, width, height int) {
 	w.controls[id] = createWindow("BUTTON", text, wsChild|wsVisible|wsTabStop|bsPushButton, x, y, width, height, w.hwnd, id)
+}
+
+func createGroup(parent windows.Handle, text string, x, y, width, height int) windows.Handle {
+	return createWindow("BUTTON", text, wsChild|wsVisible|bsGroupBox, x, y, width, height, parent, 0)
 }
 
 func createStatic(parent windows.Handle, text string, x, y, width, height int) windows.Handle {
@@ -485,4 +549,51 @@ func multiStringPtr(parts ...string) *uint16 {
 	}
 	values = append(values, 0)
 	return &values[0]
+}
+
+func installerFilenameWarning(path string) string {
+	name := strings.ToLower(filepath.Base(strings.TrimSpace(path)))
+	if name == "" {
+		return ""
+	}
+	switch name {
+	case "grabberem.x64.msi", "grabberem.x32.msi", "grabbertt.x64.msi", "grabbertt.x32.msi", "grabber.msi":
+		return ""
+	default:
+		return "Unsupported installer filename. Backend validation may reject it."
+	}
+}
+
+func filepathFromReport(reportDir string, name string) string {
+	if strings.TrimSpace(reportDir) == "" {
+		return ""
+	}
+	return filepath.Join(reportDir, name)
+}
+
+func copyText(owner windows.Handle, text string) error {
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("nothing to copy")
+	}
+	if ret, _, err := procOpenClipboard.Call(uintptr(owner)); ret == 0 {
+		return fmt.Errorf("open clipboard failed: %w", err)
+	}
+	defer procCloseClipboard.Call()
+	procEmptyClipboard.Call()
+	utf16 := syscall.StringToUTF16(text)
+	bytes := uintptr(len(utf16) * 2)
+	h, _, err := procGlobalAlloc.Call(0x0042, bytes)
+	if h == 0 {
+		return fmt.Errorf("clipboard allocation failed: %w", err)
+	}
+	ptr, _, err := procGlobalLock.Call(h)
+	if ptr == 0 {
+		return fmt.Errorf("clipboard lock failed: %w", err)
+	}
+	copy(unsafe.Slice((*uint16)(unsafe.Pointer(ptr)), len(utf16)), utf16)
+	procGlobalUnlock.Call(h)
+	if ret, _, err := procSetClipboardData.Call(13, h); ret == 0 {
+		return fmt.Errorf("set clipboard data failed: %w", err)
+	}
+	return nil
 }
