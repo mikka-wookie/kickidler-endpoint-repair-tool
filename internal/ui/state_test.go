@@ -128,20 +128,24 @@ func TestStartupViewDoesNotCallWorkflowService(t *testing.T) {
 	}
 }
 
-func TestMainLayoutHasMinimumSizeAndExpandingRegions(t *testing.T) {
-	minLayout := computeMainLayout(800, 600)
-	if minLayout.Header.W < minWindowWidth-32 {
-		t.Fatalf("header did not use minimum width: %#v", minLayout.Header)
+func TestMainWindowMinimumSizeConfigured(t *testing.T) {
+	size := MinWindowSize()
+	if size.Width != 1100 || size.Height != 760 {
+		t.Fatalf("minimum window size = %#v", size)
 	}
-	wide := computeMainLayout(1400, 900)
-	if wide.Header.W <= minLayout.Header.W {
-		t.Fatalf("header did not expand: min=%#v wide=%#v", minLayout.Header, wide.Header)
+}
+
+func TestTimelineCapAggregatesOverflow(t *testing.T) {
+	items := make([]TimelineItem, 30)
+	for i := range items {
+		items[i] = TimelineItem{Step: "event", Status: "success", Message: "item"}
 	}
-	if wide.Timeline.H <= minLayout.Timeline.H {
-		t.Fatalf("timeline did not expand vertically: min=%#v wide=%#v", minLayout.Timeline, wide.Timeline)
+	capped := capTimeline(items, 25)
+	if len(capped) != 25 {
+		t.Fatalf("capped length = %d", len(capped))
 	}
-	if wide.Details.W <= minLayout.Details.W {
-		t.Fatalf("details did not expand horizontally: min=%#v wide=%#v", minLayout.Details, wide.Details)
+	if !strings.Contains(capped[len(capped)-1].Message, "additional events") {
+		t.Fatalf("missing aggregate timeline item: %#v", capped[len(capped)-1])
 	}
 }
 

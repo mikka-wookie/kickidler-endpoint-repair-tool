@@ -248,13 +248,16 @@ if ($IncludeGui) {
     Invoke-Step "Building GUI" {
         $oldGOOS = $env:GOOS
         $oldGOARCH = $env:GOARCH
+        $oldCGO = $env:CGO_ENABLED
         try {
             $env:GOOS = "windows"
             $env:GOARCH = "amd64"
+            $env:CGO_ENABLED = "1"
             go build -trimpath -ldflags "$ldflags -H windowsgui" -o $guiPath ./cmd/kigrepair-gui
         } finally {
             $env:GOOS = $oldGOOS
             $env:GOARCH = $oldGOARCH
+            $env:CGO_ENABLED = $oldCGO
         }
     }
 } else {

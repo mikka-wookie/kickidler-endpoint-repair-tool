@@ -1,3 +1,5 @@
+//go:build oldgui
+
 package ui
 
 const (
