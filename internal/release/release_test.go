@@ -78,6 +78,13 @@ func TestReleaseScriptInjectsVersionPackageMetadata(t *testing.T) {
 	}
 }
 
+func TestReleaseScriptBuildsGUIWithoutConsoleWindow(t *testing.T) {
+	content := readText(t, "scripts/build-release.ps1")
+	if !strings.Contains(content, "-H windowsgui") {
+		t.Fatal("build-release.ps1 must build kigrepair-gui.exe with -H windowsgui")
+	}
+}
+
 func TestReleaseScriptDoesNotReferenceSecretEnvironmentNames(t *testing.T) {
 	content := strings.ToLower(readText(t, "scripts/build-release.ps1"))
 	for _, value := range []string{"access_token", "refresh_token", "authorization: bearer", "password="} {

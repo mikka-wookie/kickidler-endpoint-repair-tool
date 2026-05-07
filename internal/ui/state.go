@@ -54,8 +54,12 @@ type ResultView struct {
 	Classification        string
 	InstallMode           string
 	Recommendation        string
+	RecommendationCode    string
+	RecommendationTitle   string
 	PrimaryIssueCode      string
+	PrimaryIssueTitle     string
 	NextRecommendedAction string
+	BlockingReasons       []string
 	Warnings              []string
 	Errors                []string
 	Timeline              []TimelineItem
@@ -71,6 +75,45 @@ type TimelineItem struct {
 	Message         string
 	DurationMS      int64
 	FailureCategory string
+	DetailsFile     string
+}
+
+type ResultFiles struct {
+	ReportDir         string `json:"report_dir,omitempty"`
+	SummaryFile       string `json:"summary_file,omitempty"`
+	OperationsFile    string `json:"operations_file,omitempty"`
+	PrimaryResultFile string `json:"primary_result_file,omitempty"`
+	CleanupPlanFile   string `json:"cleanup_plan_file,omitempty"`
+	SupportBundlePath string `json:"support_bundle_path,omitempty"`
+}
+
+type GUIState struct {
+	Version             string         `json:"version,omitempty"`
+	Commit              string         `json:"commit,omitempty"`
+	Profile             string         `json:"profile,omitempty"`
+	IsAdmin             bool           `json:"is_admin"`
+	IsRunning           bool           `json:"is_running"`
+	CurrentWorkflow     string         `json:"current_workflow,omitempty"`
+	CurrentStatus       string         `json:"current_status,omitempty"`
+	LatestRunID         string         `json:"latest_run_id,omitempty"`
+	LatestReportDir     string         `json:"latest_report_dir,omitempty"`
+	Health              string         `json:"health,omitempty"`
+	InstallMode         string         `json:"install_mode,omitempty"`
+	PrimaryIssueCode    string         `json:"primary_issue_code,omitempty"`
+	PrimaryIssueTitle   string         `json:"primary_issue_title,omitempty"`
+	RecommendationCode  string         `json:"recommendation_code,omitempty"`
+	RecommendationTitle string         `json:"recommendation_title,omitempty"`
+	BlockingReasons     []string       `json:"blocking_reasons,omitempty"`
+	Warnings            []string       `json:"warnings,omitempty"`
+	Timeline            []TimelineItem `json:"timeline,omitempty"`
+	Files               ResultFiles    `json:"files"`
+	InstallerPath       string         `json:"installer_path,omitempty"`
+	InvitePresent       bool           `json:"invite_present"`
+}
+
+type ButtonState struct {
+	ActionsEnabled bool
+	CancelEnabled  bool
 }
 
 type Controller struct {
@@ -113,8 +156,25 @@ func (c *Controller) Cancel() {
 	}
 }
 
+func ComputeButtonState(isRunning bool) ButtonState {
+	return ButtonState{
+		ActionsEnabled: !isRunning,
+		CancelEnabled:  isRunning,
+	}
+}
+
 func (c *Controller) ProgressSink() app.ProgressSink {
 	return progressSink{controller: c}
+}
+
+func (c *Controller) ProgressCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.events)
+}
+
+func (c *Controller) ProgressTimeline() []TimelineItem {
+	return c.progressTimeline()
 }
 
 func (c *Controller) Run(parent context.Context, action Action, inputs Inputs) (ResultView, error) {
@@ -284,15 +344,19 @@ func requireRealRepairInputs(inputs Inputs) error {
 
 func RealRepairConfirmation() ConfirmationRequest {
 	return ConfirmationRequest{
-		Title:        "Confirm Real Repair",
+		Title:        "Confirm real repair",
 		RequiredText: "YES",
 		Message: strings.Join([]string{
-			"This will modify the system.",
-			"It may stop/delete validated Grabber services/processes.",
-			"It may uninstall/reinstall MSI.",
-			"It may add Defender exclusions.",
-			"A rollback/change snapshot will be written before changes.",
-			"Type exact YES to continue.",
+			"This action can modify the system.",
+			"",
+			"It may:",
+			"- stop validated Grabber services/processes",
+			"- remove validated leftovers",
+			"- run MSI uninstall/install",
+			"- add Defender exclusions",
+			"- write rollback/change snapshot before mutation",
+			"",
+			"Type YES to continue.",
 		}, "\r\n"),
 	}
 }
@@ -340,6 +404,7 @@ func cloneResultView(in ResultView) ResultView {
 	out := in
 	out.Warnings = append([]string(nil), in.Warnings...)
 	out.Errors = append([]string(nil), in.Errors...)
+	out.BlockingReasons = append([]string(nil), in.BlockingReasons...)
 	out.Timeline = append([]TimelineItem(nil), in.Timeline...)
 	out.Reports = append([]string(nil), in.Reports...)
 	return out

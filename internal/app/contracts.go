@@ -10,8 +10,11 @@ import (
 type WorkflowStatus string
 
 const (
+	WorkflowStatusIdle      WorkflowStatus = "idle"
+	WorkflowStatusRunning   WorkflowStatus = "running"
 	WorkflowStatusSuccess   WorkflowStatus = "success"
 	WorkflowStatusWarning   WorkflowStatus = "warning"
+	WorkflowStatusNotReady  WorkflowStatus = "not_ready"
 	WorkflowStatusFailed    WorkflowStatus = "failed"
 	WorkflowStatusCancelled WorkflowStatus = "cancelled"
 )
@@ -116,6 +119,7 @@ type WorkflowResponseMeta struct {
 
 type WorkflowResponse struct {
 	Meta           WorkflowResponseMeta `json:"meta"`
+	Outcome        *WorkflowOutcome     `json:"outcome,omitempty"`
 	Result         any                  `json:"result,omitempty"`
 	Classification any                  `json:"classification,omitempty"`
 	Recommendation any                  `json:"recommendation,omitempty"`
@@ -123,6 +127,118 @@ type WorkflowResponse struct {
 	Errors         []string             `json:"errors,omitempty"`
 	Timeline       []OperationResult    `json:"timeline,omitempty"`
 	Policy         config.PolicySummary `json:"policy"`
+}
+
+type WorkflowOutcome struct {
+	RunID             string               `json:"run_id"`
+	Workflow          string               `json:"workflow"`
+	Status            string               `json:"status"`
+	ExitCode          int                  `json:"exit_code"`
+	StartedAt         time.Time            `json:"started_at"`
+	FinishedAt        time.Time            `json:"finished_at"`
+	DurationMS        int64                `json:"duration_ms"`
+	ReportDir         string               `json:"report_dir,omitempty"`
+	SummaryFile       string               `json:"summary_file,omitempty"`
+	OperationsFile    string               `json:"operations_file,omitempty"`
+	PrimaryResultFile string               `json:"primary_result_file,omitempty"`
+	Health            string               `json:"health,omitempty"`
+	InstallMode       string               `json:"install_mode,omitempty"`
+	RepairReadiness   string               `json:"repair_readiness,omitempty"`
+	PrimaryIssue      *IssueSummary        `json:"primary_issue,omitempty"`
+	Recommendation    *ActionSummary       `json:"recommendation,omitempty"`
+	BlockingReasons   []UserMessage        `json:"blocking_reasons,omitempty"`
+	Warnings          []UserMessage        `json:"warnings,omitempty"`
+	Errors            []UserMessage        `json:"errors,omitempty"`
+	Timeline          []TimelineItem       `json:"timeline,omitempty"`
+	Files             ResultFileSummary    `json:"files,omitempty"`
+	Policy            config.PolicySummary `json:"policy,omitempty"`
+	Admin             AdminSummary         `json:"admin,omitempty"`
+	Installer         InstallerSummary     `json:"installer,omitempty"`
+	Defender          DefenderSummary      `json:"defender,omitempty"`
+	Extra             map[string]string    `json:"extra,omitempty"`
+}
+
+type UserMessage struct {
+	Code       string `json:"code,omitempty"`
+	Severity   string `json:"severity"`
+	Title      string `json:"title"`
+	Message    string `json:"message"`
+	Action     string `json:"action,omitempty"`
+	DetailsRef string `json:"details_ref,omitempty"`
+}
+
+type TimelineItem struct {
+	OperationID     string `json:"operation_id,omitempty"`
+	Status          string `json:"status"`
+	Message         string `json:"message"`
+	DurationMS      int64  `json:"duration_ms,omitempty"`
+	FailureCategory string `json:"failure_category,omitempty"`
+	DetailsRef      string `json:"details_ref,omitempty"`
+}
+
+type IssueSummary struct {
+	Code     string `json:"code"`
+	Severity string `json:"severity"`
+	Title    string `json:"title"`
+	Message  string `json:"message"`
+	Action   string `json:"action,omitempty"`
+}
+
+type ActionSummary struct {
+	Code          string `json:"code"`
+	Title         string `json:"title"`
+	Description   string `json:"description,omitempty"`
+	Command       string `json:"command,omitempty"`
+	Destructive   bool   `json:"destructive"`
+	RequiresAdmin bool   `json:"requires_admin"`
+	RequiresYes   bool   `json:"requires_yes"`
+}
+
+type ResultFileSummary struct {
+	ReportDir            string `json:"report_dir,omitempty"`
+	Summary              string `json:"summary,omitempty"`
+	Operations           string `json:"operations,omitempty"`
+	InitialDetection     string `json:"initial_detection,omitempty"`
+	FinalDetection       string `json:"final_detection,omitempty"`
+	PreflightResult      string `json:"preflight_result,omitempty"`
+	RepairPlan           string `json:"repair_plan,omitempty"`
+	RepairResult         string `json:"repair_result,omitempty"`
+	CleanupPlan          string `json:"cleanup_plan,omitempty"`
+	CleanupResult        string `json:"cleanup_result,omitempty"`
+	VerificationResult   string `json:"verification_result,omitempty"`
+	ClassificationResult string `json:"classification_result,omitempty"`
+	RecommendationResult string `json:"recommendation_result,omitempty"`
+	InstallerValidation  string `json:"installer_validation,omitempty"`
+	DefenderResult       string `json:"defender_result,omitempty"`
+	SupportBundle        string `json:"support_bundle,omitempty"`
+	ReportsList          string `json:"reports_list,omitempty"`
+	ReportsCleanupPlan   string `json:"reports_cleanup_plan,omitempty"`
+	ReportsCleanupResult string `json:"reports_cleanup_result,omitempty"`
+	ConfigShow           string `json:"config_show,omitempty"`
+	ConfigValidation     string `json:"config_validation,omitempty"`
+	PrimaryResult        string `json:"primary_result,omitempty"`
+}
+
+type AdminSummary struct {
+	IsAdmin     bool   `json:"is_admin"`
+	LimitedMode bool   `json:"limited_mode"`
+	Message     string `json:"message,omitempty"`
+}
+
+type InstallerSummary struct {
+	Path     string `json:"path,omitempty"`
+	Exists   bool   `json:"exists"`
+	Readable bool   `json:"readable"`
+	Valid    bool   `json:"valid"`
+	Status   string `json:"status,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
+
+type DefenderSummary struct {
+	Status   string `json:"status,omitempty"`
+	Required bool   `json:"required"`
+	Covered  bool   `json:"covered"`
+	Message  string `json:"message,omitempty"`
 }
 
 type CheckResponse = WorkflowResponse

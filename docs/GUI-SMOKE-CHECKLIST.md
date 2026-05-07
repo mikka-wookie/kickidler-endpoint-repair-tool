@@ -1,0 +1,23 @@
+# GUI Smoke Checklist
+
+- [ ] GUI launches without console window
+- [ ] GUI becomes visible within 1 second
+- [ ] No blank frozen startup
+- [ ] No Not Responding during idle
+- [ ] Header shows version/profile/admin state
+- [ ] Check runs and GUI remains responsive
+- [ ] Verify runs and GUI remains responsive
+- [ ] Collect Bundle runs and GUI remains responsive
+- [ ] Preflight with missing installer shows Installer file missing
+- [ ] Non-admin mode shows Administrator rights required
+- [ ] Repair Dry-Run shows Not ready when preflight blocks
+- [ ] Timeline is compact
+- [ ] Report directory is visible
+- [ ] Open Report Folder works
+- [ ] Open Summary works or fails safely
+- [ ] Open Operations works or fails safely
+- [ ] Copy Report Path works
+- [ ] Invite field is masked
+- [ ] Invite field clears after workflow
+- [ ] Real Repair requires exact YES
+- [ ] Real Repair remains blocked when admin/installer/invite missing

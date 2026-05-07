@@ -21,20 +21,44 @@ type fakeService struct {
 	called     []Action
 }
 
+func (f *fakeService) wait(ctx context.Context) error {
+	if f.delay <= 0 {
+		return nil
+	}
+	select {
+	case <-time.After(f.delay):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (f *fakeService) Check(ctx context.Context, req app.CheckRequest) (*app.CheckResponse, error) {
 	f.called = append(f.called, ActionCheck)
+	if err := f.wait(ctx); err != nil {
+		return response("check", "cancelled"), err
+	}
 	return response("check", "success"), nil
 }
 func (f *fakeService) Verify(ctx context.Context, req app.VerifyRequest) (*app.VerifyResponse, error) {
 	f.called = append(f.called, ActionVerify)
+	if err := f.wait(ctx); err != nil {
+		return response("verify", "cancelled"), err
+	}
 	return response("verify", "success"), nil
 }
 func (f *fakeService) Preflight(ctx context.Context, req app.PreflightRequest) (*app.PreflightResponse, error) {
 	f.called = append(f.called, ActionPreflight)
+	if err := f.wait(ctx); err != nil {
+		return response("preflight", "cancelled"), err
+	}
 	return responseWithTimeline("preflight", "invite="+req.InviteValue), nil
 }
 func (f *fakeService) RepairPlan(ctx context.Context, req app.RepairPlanRequest) (*app.RepairPlanResponse, error) {
 	f.called = append(f.called, ActionRepairDryRun)
+	if err := f.wait(ctx); err != nil {
+		return response("repair --dry-run", "cancelled"), err
+	}
 	return responseWithTimeline("repair --dry-run", "plan invite="+req.InviteValue), nil
 }
 func (f *fakeService) Repair(ctx context.Context, req app.RepairRequest) (*app.RepairResponse, error) {
@@ -49,15 +73,16 @@ func (f *fakeService) Cleanup(ctx context.Context, req app.CleanupRequest) (*app
 	return response("cleanup", "success"), nil
 }
 func (f *fakeService) CollectReport(ctx context.Context, req app.CollectReportRequest) (*app.CollectReportResponse, error) {
+	f.called = append(f.called, ActionCollectReport)
+	if err := f.wait(ctx); err != nil {
+		return response("collect-report", "cancelled"), err
+	}
 	return response("collect-report", "success"), nil
 }
 func (f *fakeService) ReportsList(ctx context.Context, req app.ReportsListRequest) (*app.ReportsListResponse, error) {
-	if f.delay > 0 {
-		select {
-		case <-time.After(f.delay):
-		case <-ctx.Done():
-			return response("reports-list", "cancelled"), ctx.Err()
-		}
+	f.called = append(f.called, ActionReportsList)
+	if err := f.wait(ctx); err != nil {
+		return response("reports-list", "cancelled"), err
 	}
 	return response("reports-list", "success"), nil
 }
@@ -88,6 +113,49 @@ func TestResultRenderingDoesNotExposeInvite(t *testing.T) {
 	assertNoInvite(t, view)
 }
 
+func TestStartupViewDoesNotCallWorkflowService(t *testing.T) {
+	svc := &fakeService{}
+	controller := NewController(svc, nil)
+	view := InitialResultView()
+	if len(svc.called) != 0 {
+		t.Fatalf("startup called workflows: %#v", svc.called)
+	}
+	if controller.IsRunning() {
+		t.Fatal("startup should not mark controller running")
+	}
+	if view.Status != "Idle" || !strings.Contains(FormatTimeline(view.Timeline), "Start with Check") {
+		t.Fatalf("unexpected startup view: %#v", view)
+	}
+}
+
+func TestMainWindowMinimumSizeConfigured(t *testing.T) {
+	size := MinWindowSize()
+	if size.Width != 1100 || size.Height != 760 {
+		t.Fatalf("minimum window size = %#v", size)
+	}
+}
+
+func TestTimelineCapAggregatesOverflow(t *testing.T) {
+	items := make([]TimelineItem, 30)
+	for i := range items {
+		items[i] = TimelineItem{Step: "event", Status: "success", Message: "item"}
+	}
+	capped := capTimeline(items, 25)
+	if len(capped) != 25 {
+		t.Fatalf("capped length = %d", len(capped))
+	}
+	if !strings.Contains(capped[len(capped)-1].Message, "additional events") {
+		t.Fatalf("missing aggregate timeline item: %#v", capped[len(capped)-1])
+	}
+}
+
+func TestGUIOptionsParseSafeRelaunchFlags(t *testing.T) {
+	opts := parseGUIOptions([]string{"--elevated-child", "--no-auto-workflow", "--profile", "diagnostic", "--allow-multiple"})
+	if !opts.ElevatedChild || !opts.NoAutoWorkflow || !opts.AllowMultiple || opts.Profile != "diagnostic" {
+		t.Fatalf("options = %#v", opts)
+	}
+}
+
 func TestBuildResultViewExtractsSupportFields(t *testing.T) {
 	resp := response("collect-report", "warning")
 	resp.Result = map[string]any{
@@ -114,9 +182,159 @@ func TestBuildResultViewExtractsSupportFields(t *testing.T) {
 	if view.Recommendation != "Collect support bundle and escalate." {
 		t.Fatalf("recommendation = %q", view.Recommendation)
 	}
+	if view.RecommendationCode != "collect_bundle" {
+		t.Fatalf("recommendation code = %q", view.RecommendationCode)
+	}
 	if !strings.HasSuffix(view.SupportBundlePath, "kigrepair-support-bundle.zip") {
 		t.Fatalf("support bundle path = %q", view.SupportBundlePath)
 	}
+}
+
+func TestMapNotReadyRepairPlanToGUIState(t *testing.T) {
+	resp := response("repair --dry-run", "warning")
+	resp.Result = map[string]any{
+		"repair_plan": map[string]any{
+			"status":           "not_ready",
+			"ready_for_repair": false,
+			"detection_health": "unknown",
+			"install_mode":     "unknown",
+			"classification": map[string]any{
+				"primary_issue": map[string]any{"code": "partial_msi_leftovers", "title": "Partial MSI leftovers"},
+			},
+			"recommendation": map[string]any{
+				"primary_action": map[string]any{"code": "cleanup_dry_run", "message": "Run cleanup dry-run"},
+			},
+			"preflight": map[string]any{
+				"checks": []any{
+					map[string]any{"name": "admin_rights", "status": "failed", "required": true},
+					map[string]any{"name": "installer_available", "status": "failed", "required": true},
+				},
+			},
+		},
+	}
+	state := MapWorkflowResponseToGUIState(resp)
+	if state.CurrentStatus != "Not ready" {
+		t.Fatalf("status = %q", state.CurrentStatus)
+	}
+	if state.PrimaryIssueCode != "partial_msi_leftovers" {
+		t.Fatalf("primary issue = %q", state.PrimaryIssueCode)
+	}
+	if state.PrimaryIssueTitle != "MSI registry leftovers found" {
+		t.Fatalf("primary issue title = %q", state.PrimaryIssueTitle)
+	}
+	if state.RecommendationTitle != "Run cleanup dry-run" {
+		t.Fatalf("recommendation = %q", state.RecommendationTitle)
+	}
+	if !contains(state.BlockingReasons, "Administrator rights required.") || !contains(state.BlockingReasons, "Installer file was not found.") {
+		t.Fatalf("blocking reasons = %#v", state.BlockingReasons)
+	}
+	if state.Files.ReportDir == "" {
+		t.Fatal("report dir was not mapped")
+	}
+}
+
+func TestGUIConsumesWorkflowOutcomeForPrimaryStatus(t *testing.T) {
+	resp := response("repair --dry-run", "failed")
+	resp.Result = map[string]any{"health": "wrong"}
+	resp.Warnings = []string{"raw warning that should not drive primary card"}
+	resp.Timeline = []app.OperationResult{{
+		Step:      "raw.step",
+		Status:    app.OperationStatusWarning,
+		Message:   "raw operation that should not be rendered",
+		Timestamp: time.Now(),
+	}}
+	resp.Outcome = &app.WorkflowOutcome{
+		RunID:           "run-outcome",
+		Workflow:        "repair --dry-run",
+		Status:          string(app.WorkflowStatusNotReady),
+		ExitCode:        app.ExitInvalidInput,
+		ReportDir:       resp.Meta.ReportDir,
+		Health:          "unknown",
+		InstallMode:     "unknown",
+		RepairReadiness: "not_ready",
+		PrimaryIssue:    &app.IssueSummary{Code: "partial_msi_leftovers", Title: "MSI registry leftovers found"},
+		Recommendation:  &app.ActionSummary{Code: "run_cleanup_dry_run", Title: "Run cleanup dry-run"},
+		BlockingReasons: []app.UserMessage{{Code: "admin_rights", Severity: "error", Title: "Administrator rights required", Message: "Restart the tool as Administrator to complete service, Defender, and repair checks."}},
+		Timeline:        []app.TimelineItem{{OperationID: "compact", Status: "warning", Message: "Additional details saved in operations.json.", DetailsRef: resp.Meta.OperationsFile}},
+		Files:           app.BuildResultFileSummary(resp.Meta.ReportDir, resp.Meta.PrimaryResultFile),
+	}
+	view := BuildResultView(resp)
+	if view.Status != "Not ready" || view.Classification != "unknown" || view.InstallMode != "unknown" {
+		t.Fatalf("view did not use outcome: %#v", view)
+	}
+	if view.PrimaryIssueCode != "partial_msi_leftovers" || view.RecommendationCode != "run_cleanup_dry_run" {
+		t.Fatalf("support summaries not mapped from outcome: %#v", view)
+	}
+	if len(view.Timeline) != 1 || view.Timeline[0].Step != "compact" {
+		t.Fatalf("GUI rendered raw timeline instead of compact outcome: %#v", view.Timeline)
+	}
+	if view.OperationsFile == "" || view.PrimaryResultFile == "" {
+		t.Fatalf("file references missing: %#v", view)
+	}
+}
+
+func TestCollectReportWarningTimelineIsSupportReadable(t *testing.T) {
+	resp := response("collect-report", "warning")
+	resp.Errors = nil
+	resp.Warnings = []string{
+		"optional file missing: final-detection.json",
+		"optional file missing: repair-result.json",
+		"Wrote eventlogs/README.txt; event log collection is not implemented yet",
+	}
+	resp.Result = map[string]any{
+		"bundle_path": filepath.Join(resp.Meta.ReportDir, "kigrepair-support-bundle.zip"),
+		"classification": map[string]any{
+			"primary_issue": map[string]any{"code": "partial_msi_leftovers"},
+		},
+		"recommendation": map[string]any{
+			"primary_action": map[string]any{"code": "run_cleanup_dry_run"},
+		},
+	}
+	resp.Timeline = []app.OperationResult{
+		{Step: "collect.system", Status: app.OperationStatusSuccess, Message: "Wrote system/environment.json"},
+		{Step: "collect.services", Status: app.OperationStatusSuccess, Message: "Wrote system/services.json"},
+		{Step: "collect.eventlogs", Status: app.OperationStatusWarning, Message: "Wrote eventlogs/README.txt; event log collection is not implemented yet"},
+	}
+	view := BuildResultView(resp)
+	text := FormatTimeline(view.Timeline)
+	if strings.Contains(text, "Wrote system/environment.json") || strings.Contains(text, "Wrote system/services.json") {
+		t.Fatalf("raw collector entries leaked into timeline:\n%s", text)
+	}
+	if !strings.Contains(text, "Support bundle created with non-blocking warnings") {
+		t.Fatalf("missing non-fatal warning message:\n%s", text)
+	}
+	if strings.Count(text, "optional") > 1 {
+		t.Fatalf("optional warnings were not summarized:\n%s", text)
+	}
+	summary := FormatSystemStatus(view)
+	if !strings.Contains(summary, "Support bundle created") || strings.Contains(summary, "failed") {
+		t.Fatalf("collect warning summary is misleading:\n%s", summary)
+	}
+}
+
+func TestWarningAggregationCollapsesProcessFlood(t *testing.T) {
+	var warnings []string
+	for i := 0; i < 91; i++ {
+		warnings = append(warnings, "Skipped unsafe process match")
+	}
+	items := AggregateTimelineWarnings(nil, warnings, "cleanup-plan.json")
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	if !strings.Contains(items[0].Message, "91") || items[0].DetailsFile != "cleanup-plan.json" {
+		t.Fatalf("aggregate item = %#v", items[0])
+	}
+}
+
+func TestInviteNotStoredInGUIStateOrTimeline(t *testing.T) {
+	resp := responseWithTimeline("repair --dry-run", "invite="+testInvite)
+	resp.Warnings = []string{"warning invite=" + testInvite}
+	resp.Errors = []string{"error invite=" + testInvite}
+	resp.Result = map[string]any{"errors": []any{"result invite=" + testInvite}}
+	view := BuildResultView(resp)
+	assertNoInvite(t, view)
+	state := MapWorkflowResponseToGUIState(resp)
+	assertNoInvite(t, state)
 }
 
 func TestTimelineRenderingIncludesDurationAndFailureCategory(t *testing.T) {
@@ -144,6 +362,14 @@ func TestRealRepairRequiresExactYES(t *testing.T) {
 	}
 	if len(svc.called) != 0 {
 		t.Fatalf("repair workflow was called without exact YES: %#v", svc.called)
+	}
+}
+
+func TestRealRepairConfirmationRejectsCancelAndWhitespace(t *testing.T) {
+	for _, input := range []string{"", " YES", "YES ", "Yes"} {
+		if AcceptExactYES(input) {
+			t.Fatalf("confirmation accepted %q", input)
+		}
 	}
 }
 
@@ -183,6 +409,65 @@ func TestOnlyOneWorkflowCanRunAtATimeAndCancelUsesContext(t *testing.T) {
 	err := <-errCh
 	if !errors.Is(err, context.Canceled) && (err == nil || !strings.Contains(err.Error(), "canceled")) {
 		t.Fatalf("expected context cancellation, got %v", err)
+	}
+}
+
+func TestGUIWorkflowActionsUseControllerRunningState(t *testing.T) {
+	for _, action := range []Action{ActionCheck, ActionVerify, ActionCollectReport, ActionPreflight, ActionRepairDryRun} {
+		t.Run(string(action), func(t *testing.T) {
+			svc := &fakeService{delay: 200 * time.Millisecond}
+			controller := NewController(svc, nil)
+			done := make(chan error, 1)
+			go func() {
+				_, err := controller.Run(context.Background(), action, Inputs{InstallerPath: "grabber.msi", InviteValue: testInvite})
+				done <- err
+			}()
+			deadline := time.Now().Add(time.Second)
+			for !controller.IsRunning() && time.Now().Before(deadline) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			if !controller.IsRunning() {
+				t.Fatal("controller did not enter running state promptly")
+			}
+			state := ComputeButtonState(controller.IsRunning())
+			if state.ActionsEnabled || !state.CancelEnabled {
+				t.Fatalf("running button state = %#v", state)
+			}
+			if err := <-done; err != nil {
+				t.Fatalf("workflow returned error: %v", err)
+			}
+			if controller.IsRunning() {
+				t.Fatal("controller did not leave running state")
+			}
+		})
+	}
+}
+
+func TestButtonStateWhileRunning(t *testing.T) {
+	running := ComputeButtonState(true)
+	if running.ActionsEnabled || !running.CancelEnabled {
+		t.Fatalf("running button state = %#v", running)
+	}
+	idle := ComputeButtonState(false)
+	if !idle.ActionsEnabled || idle.CancelEnabled {
+		t.Fatalf("idle button state = %#v", idle)
+	}
+}
+
+func TestFileButtonEmptyStateIsSafe(t *testing.T) {
+	if err := OpenPath(""); err == nil || !strings.Contains(err.Error(), "path is empty") {
+		t.Fatalf("empty path error = %v", err)
+	}
+	view := InitialResultView()
+	if view.ReportDir != "" || view.SummaryFile != "" || view.OperationsFile != "" {
+		t.Fatalf("initial view should not expose stale file paths: %#v", view)
+	}
+}
+
+func TestOpenPathMissingFileReturnsSafeError(t *testing.T) {
+	err := OpenPath(filepath.Join(t.TempDir(), "missing-summary.txt"))
+	if err == nil {
+		t.Fatal("expected missing file error")
 	}
 }
 
@@ -258,6 +543,15 @@ func assertNoInvite(t *testing.T, value any) {
 	if strings.Contains(string(data), testInvite) {
 		t.Fatalf("invite leaked: %s", data)
 	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func assertNoImportPrefix(t *testing.T, dir string, forbidden string) {
