@@ -46,6 +46,41 @@ Verify:
 - `SIGNATURES.txt` records unsigned warning or successful signing.
 - `kigrepair.exe version --json` shows version, commit, build date, built by, Go version, OS/arch, signed status, and executable path.
 
+## MVP Gate
+
+- [ ] gofmt/go mod tidy/go test pass
+- [ ] CLI build passes
+- [ ] GUI build passes
+- [ ] CLI smoke passes
+- [ ] GUI smoke passes
+- [ ] redaction test passes
+- [ ] no open P0 bugs
+- [ ] no open P1 bugs
+- [ ] MVP readiness report generated
+- [ ] release blocker check passes
+- [ ] known limitations updated
+- [ ] support runbook updated
+
+Run the gate scripts:
+
+```powershell
+.\scripts\smoke-mvp.ps1 `
+  -KigrepairPath ".\kigrepair.exe" `
+  -GuiPath ".\kigrepair-gui.exe" `
+  -OutDir ".\evidence\mvp-smoke"
+
+.\scripts\check-redaction.ps1 `
+  -Path ".\evidence\mvp-smoke" `
+  -SecretPattern "REAL-SECRET-INVITE"
+
+.\scripts\generate-mvp-readiness.ps1 `
+  -SmokeResult ".\evidence\mvp-smoke\smoke-result.json" `
+  -OutFile ".\docs\MVP-READINESS.md"
+
+.\scripts\check-release-blockers.ps1 `
+  -SmokeResult ".\evidence\mvp-smoke\smoke-result.json"
+```
+
 ## D. Smoke Test
 
 ```powershell

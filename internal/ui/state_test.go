@@ -21,20 +21,44 @@ type fakeService struct {
 	called     []Action
 }
 
+func (f *fakeService) wait(ctx context.Context) error {
+	if f.delay <= 0 {
+		return nil
+	}
+	select {
+	case <-time.After(f.delay):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (f *fakeService) Check(ctx context.Context, req app.CheckRequest) (*app.CheckResponse, error) {
 	f.called = append(f.called, ActionCheck)
+	if err := f.wait(ctx); err != nil {
+		return response("check", "cancelled"), err
+	}
 	return response("check", "success"), nil
 }
 func (f *fakeService) Verify(ctx context.Context, req app.VerifyRequest) (*app.VerifyResponse, error) {
 	f.called = append(f.called, ActionVerify)
+	if err := f.wait(ctx); err != nil {
+		return response("verify", "cancelled"), err
+	}
 	return response("verify", "success"), nil
 }
 func (f *fakeService) Preflight(ctx context.Context, req app.PreflightRequest) (*app.PreflightResponse, error) {
 	f.called = append(f.called, ActionPreflight)
+	if err := f.wait(ctx); err != nil {
+		return response("preflight", "cancelled"), err
+	}
 	return responseWithTimeline("preflight", "invite="+req.InviteValue), nil
 }
 func (f *fakeService) RepairPlan(ctx context.Context, req app.RepairPlanRequest) (*app.RepairPlanResponse, error) {
 	f.called = append(f.called, ActionRepairDryRun)
+	if err := f.wait(ctx); err != nil {
+		return response("repair --dry-run", "cancelled"), err
+	}
 	return responseWithTimeline("repair --dry-run", "plan invite="+req.InviteValue), nil
 }
 func (f *fakeService) Repair(ctx context.Context, req app.RepairRequest) (*app.RepairResponse, error) {
@@ -49,15 +73,16 @@ func (f *fakeService) Cleanup(ctx context.Context, req app.CleanupRequest) (*app
 	return response("cleanup", "success"), nil
 }
 func (f *fakeService) CollectReport(ctx context.Context, req app.CollectReportRequest) (*app.CollectReportResponse, error) {
+	f.called = append(f.called, ActionCollectReport)
+	if err := f.wait(ctx); err != nil {
+		return response("collect-report", "cancelled"), err
+	}
 	return response("collect-report", "success"), nil
 }
 func (f *fakeService) ReportsList(ctx context.Context, req app.ReportsListRequest) (*app.ReportsListResponse, error) {
-	if f.delay > 0 {
-		select {
-		case <-time.After(f.delay):
-		case <-ctx.Done():
-			return response("reports-list", "cancelled"), ctx.Err()
-		}
+	f.called = append(f.called, ActionReportsList)
+	if err := f.wait(ctx); err != nil {
+		return response("reports-list", "cancelled"), err
 	}
 	return response("reports-list", "success"), nil
 }
@@ -320,6 +345,37 @@ func TestOnlyOneWorkflowCanRunAtATimeAndCancelUsesContext(t *testing.T) {
 	}
 }
 
+func TestGUIWorkflowActionsUseControllerRunningState(t *testing.T) {
+	for _, action := range []Action{ActionCheck, ActionVerify, ActionCollectReport, ActionPreflight, ActionRepairDryRun} {
+		t.Run(string(action), func(t *testing.T) {
+			svc := &fakeService{delay: 200 * time.Millisecond}
+			controller := NewController(svc, nil)
+			done := make(chan error, 1)
+			go func() {
+				_, err := controller.Run(context.Background(), action, Inputs{InstallerPath: "grabber.msi", InviteValue: testInvite})
+				done <- err
+			}()
+			deadline := time.Now().Add(time.Second)
+			for !controller.IsRunning() && time.Now().Before(deadline) {
+				time.Sleep(5 * time.Millisecond)
+			}
+			if !controller.IsRunning() {
+				t.Fatal("controller did not enter running state promptly")
+			}
+			state := ComputeButtonState(controller.IsRunning())
+			if state.ActionsEnabled || !state.CancelEnabled {
+				t.Fatalf("running button state = %#v", state)
+			}
+			if err := <-done; err != nil {
+				t.Fatalf("workflow returned error: %v", err)
+			}
+			if controller.IsRunning() {
+				t.Fatal("controller did not leave running state")
+			}
+		})
+	}
+}
+
 func TestButtonStateWhileRunning(t *testing.T) {
 	running := ComputeButtonState(true)
 	if running.ActionsEnabled || !running.CancelEnabled {
@@ -328,6 +384,16 @@ func TestButtonStateWhileRunning(t *testing.T) {
 	idle := ComputeButtonState(false)
 	if !idle.ActionsEnabled || idle.CancelEnabled {
 		t.Fatalf("idle button state = %#v", idle)
+	}
+}
+
+func TestFileButtonEmptyStateIsSafe(t *testing.T) {
+	if err := OpenPath(""); err == nil || !strings.Contains(err.Error(), "path is empty") {
+		t.Fatalf("empty path error = %v", err)
+	}
+	view := InitialResultView()
+	if view.ReportDir != "" || view.SummaryFile != "" || view.OperationsFile != "" {
+		t.Fatalf("initial view should not expose stale file paths: %#v", view)
 	}
 }
 

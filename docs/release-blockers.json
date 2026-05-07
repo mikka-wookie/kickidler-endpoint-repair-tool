@@ -1,0 +1,18 @@
+{
+  "blockers": [
+    {
+      "id": "BUG-043-001",
+      "severity": "P0",
+      "status": "closed",
+      "area": "security",
+      "title": "Raw invite leakage gate covered by regression tests and redaction script"
+    },
+    {
+      "id": "BUG-043-009",
+      "severity": "P1",
+      "status": "closed",
+      "area": "release",
+      "title": "Release blocker script fails when open P0/P1 items are present"
+    }
+  ]
+}
