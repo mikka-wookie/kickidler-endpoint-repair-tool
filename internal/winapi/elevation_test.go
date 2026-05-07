@@ -29,3 +29,18 @@ func TestQuoteWindowsArgsPreservesInstallerPathWithSpaces(t *testing.T) {
 		t.Fatalf("QuoteWindowsArgs() = %q, want %q", got, want)
 	}
 }
+
+func TestAppendElevatedChildArgDoesNotDuplicate(t *testing.T) {
+	got := appendElevatedChildArg([]string{"--elevated-child", "--profile", "diagnostic"})
+	if len(got) != 3 {
+		t.Fatalf("args = %#v", got)
+	}
+}
+
+func TestGUIRelaunchArgsShapeDoesNotRequireInvite(t *testing.T) {
+	args := appendElevatedChildArg([]string{"--no-auto-workflow", "--profile", "diagnostic"})
+	quoted := QuoteWindowsArgs(args)
+	if quoted != "--no-auto-workflow --profile diagnostic --elevated-child" {
+		t.Fatalf("quoted args = %q", quoted)
+	}
+}

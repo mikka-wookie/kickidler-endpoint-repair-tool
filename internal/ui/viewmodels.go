@@ -17,9 +17,10 @@ func BuildResultView(resp *app.WorkflowResponse) ResultView {
 	}
 	if resp.Outcome != nil {
 		view := resultViewFromOutcome(*resp.Outcome)
-		if view.SupportBundlePath == "" && view.ReportDir != "" && resp.Meta.Workflow == "collect-report" {
+		if view.SupportBundlePath == "" && view.ReportDir != "" && isCollectReportWorkflow(resp.Meta.Workflow) {
 			view.SupportBundlePath = filepath.Join(view.ReportDir, "kigrepair-support-bundle.zip")
 		}
+		view.Timeline = SupportTimeline(view)
 		return view
 	}
 	state := MapWorkflowResponseToGUIState(resp)
@@ -40,9 +41,10 @@ func BuildResultView(resp *app.WorkflowResponse) ResultView {
 		})
 	}
 	view.Timeline = AggregateTimelineWarnings(view.Timeline, view.Warnings, detailsFileForAggregation(view))
-	if view.SupportBundlePath == "" && view.ReportDir != "" && resp.Meta.Workflow == "collect-report" {
+	if view.SupportBundlePath == "" && view.ReportDir != "" && isCollectReportWorkflow(resp.Meta.Workflow) {
 		view.SupportBundlePath = filepath.Join(view.ReportDir, "kigrepair-support-bundle.zip")
 	}
+	view.Timeline = SupportTimeline(view)
 	return view
 }
 
@@ -87,7 +89,7 @@ func MapWorkflowResponseToGUIState(resp *app.WorkflowResponse) GUIState {
 	if state.Files.CleanupPlanFile == "" && state.Files.ReportDir != "" {
 		state.Files.CleanupPlanFile = filepath.Join(state.Files.ReportDir, "cleanup-plan.json")
 	}
-	if state.Files.SupportBundlePath == "" && state.Files.ReportDir != "" && resp.Meta.Workflow == "collect-report" {
+	if state.Files.SupportBundlePath == "" && state.Files.ReportDir != "" && isCollectReportWorkflow(resp.Meta.Workflow) {
 		state.Files.SupportBundlePath = filepath.Join(state.Files.ReportDir, "kigrepair-support-bundle.zip")
 	}
 	return state
@@ -183,6 +185,91 @@ func FormatTimeline(items []TimelineItem) string {
 	return strings.TrimRight(b.String(), "\r\n")
 }
 
+func SupportTimeline(view ResultView) []TimelineItem {
+	if !isCollectReportWorkflow(view.Workflow) {
+		return AggregateTimelineWarnings(view.Timeline, view.Warnings, detailsFileForAggregation(view))
+	}
+	var out []TimelineItem
+	status := "success"
+	if strings.EqualFold(view.Status, "warning") {
+		status = "warning"
+	}
+	out = append(out,
+		TimelineItem{Step: "collect-started", Status: "success", Message: "Collect report started"},
+		TimelineItem{Step: "system-diagnostics", Status: "success", Message: "System diagnostics collected"},
+		TimelineItem{Step: "detection-snapshot", Status: "success", Message: "Detection snapshot collected"},
+	)
+	if view.SupportBundlePath != "" {
+		out = append(out, TimelineItem{Step: "support-bundle", Status: "success", Message: "Support bundle created", Target: view.SupportBundlePath})
+	}
+	message := "Collect Report completed"
+	if strings.EqualFold(view.Status, "warning") {
+		if len(view.Errors) == 0 && view.SupportBundlePath != "" {
+			message = "Support bundle created with non-blocking warnings."
+		} else {
+			message = "Completed with warnings"
+		}
+	}
+	out = append(out, TimelineItem{Step: "complete", Status: status, Message: message})
+	for _, warning := range collectReportWarnings(view) {
+		out = append(out, TimelineItem{Step: "warning", Status: "warning", Message: warning, DetailsFile: firstNonEmptyString(view.OperationsFile, detailsFileForAggregation(view))})
+	}
+	if view.ReportDir != "" {
+		out = append(out, TimelineItem{Step: "report-directory", Status: "success", Message: "Report directory: " + view.ReportDir})
+	}
+	return out
+}
+
+func collectReportWarnings(view ResultView) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	optionalMissing := 0
+	eventLogWarning := false
+	for _, source := range [][]TimelineItem{view.Timeline} {
+		for _, item := range source {
+			normalized := strings.ToLower(item.Message)
+			if strings.Contains(normalized, "optional file missing") || strings.Contains(normalized, "optional workflow files") {
+				optionalMissing++
+			}
+			if strings.Contains(normalized, "event log collection is not implemented") {
+				eventLogWarning = true
+			}
+		}
+	}
+	for _, warning := range view.Warnings {
+		normalized := strings.ToLower(warning)
+		if strings.Contains(normalized, "optional file missing") || strings.Contains(normalized, "optional workflow files") {
+			optionalMissing++
+			continue
+		}
+		if strings.Contains(normalized, "event log collection is not implemented") {
+			eventLogWarning = true
+			continue
+		}
+		add(warning)
+	}
+	if eventLogWarning {
+		add("Event log collection is not implemented yet.")
+	}
+	if optionalMissing > 0 {
+		add("Some optional workflow files were not present.")
+	}
+	return out
+}
+
+func isCollectReportWorkflow(workflow string) bool {
+	normalized := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(workflow)), "_", "-")
+	return normalized == "collect-report"
+}
+
 func FormatResultSummary(view ResultView) string {
 	lines := []string{
 		"Status: " + emptyAs(view.Status, "unknown"),
@@ -261,6 +348,23 @@ func extractResultSummary(view *ResultView, value any) {
 func FormatSystemStatus(view ResultView) string {
 	if strings.TrimSpace(view.Workflow) == "" && strings.TrimSpace(view.RunID) == "" {
 		return "No workflow has been run yet. Start with Check or Verify."
+	}
+	if isCollectReportWorkflow(view.Workflow) && strings.EqualFold(view.Status, "warning") && view.SupportBundlePath != "" && len(view.Errors) == 0 {
+		lines := []string{
+			"Collect Report completed with warnings.",
+			"Support bundle created:",
+			view.SupportBundlePath,
+			"Primary issue: " + emptyAs(strings.TrimSpace(view.PrimaryIssueCode+" "+view.PrimaryIssueTitle), "not available"),
+			"Recommendation: " + emptyAs(firstNonEmptyString(view.RecommendationTitle, view.Recommendation, view.NextRecommendedAction), "not available"),
+		}
+		if len(view.Warnings) > 0 {
+			lines = append(lines, "Warnings:")
+			for _, warning := range collectReportWarnings(view) {
+				lines = append(lines, "- "+warning)
+			}
+		}
+		lines = append(lines, "Report: "+emptyAs(view.ReportDir, "not available"))
+		return safety.RedactString(strings.Join(lines, "\r\n"))
 	}
 	lines := []string{
 		"Health: " + emptyAs(view.Classification, "unknown") + "       Install mode: " + emptyAs(view.InstallMode, "unknown"),
@@ -530,6 +634,8 @@ func AggregateTimelineWarnings(items []TimelineItem, warnings []string, detailsF
 func warningAggregationKey(message string) string {
 	normalized := strings.ToLower(message)
 	switch {
+	case strings.Contains(normalized, "optional file missing"), strings.Contains(normalized, "optional file skipped"):
+		return "Some optional workflow files were not present"
 	case strings.Contains(normalized, "skipped unsafe process match"):
 		return "Skipped unsafe process matches"
 	case strings.Contains(normalized, "hidden wmi process name but executable path is unavailable"):

@@ -5,6 +5,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -23,11 +24,13 @@ import (
 )
 
 const (
-	wmCommand = 0x0111
-	wmClose   = 0x0010
-	wmDestroy = 0x0002
-	wmTimer   = 0x0113
-	wmAppUI   = 0x8002
+	wmCommand       = 0x0111
+	wmClose         = 0x0010
+	wmDestroy       = 0x0002
+	wmSize          = 0x0005
+	wmGetMinMaxInfo = 0x0024
+	wmTimer         = 0x0113
+	wmAppUI         = 0x8002
 
 	bsPushButton  = 0x00000000
 	bsGroupBox    = 0x00000007
@@ -44,11 +47,16 @@ const (
 	wsVisible     = 0x10000000
 	wsChild       = 0x40000000
 	wsBorder      = 0x00800000
+	wsHScroll     = 0x00100000
 	wsVScroll     = 0x00200000
 	wsTabStop     = 0x00010000
 	wsGroup       = 0x00020000
 
-	swShow = 5
+	swShow      = 5
+	swHide      = 0
+	mbYesNo     = 0x00000004
+	idYes       = 6
+	colorWindow = 5
 )
 
 const (
@@ -75,6 +83,19 @@ const (
 	idReports
 	idCopyReportPath
 	idOpenOperations
+	idCopyBundlePath
+	idGroupSystem
+	idGroupQuick
+	idGroupRepair
+	idGroupDanger
+	idGroupTimeline
+	idGroupDetails
+	idStaticInstaller
+	idStaticInvite
+	idStaticProfile
+	idStaticProfiles
+	idStaticDanger1
+	idStaticDanger2
 )
 
 var (
@@ -95,9 +116,11 @@ var (
 	procEnableWindow     = user32.NewProc("EnableWindow")
 	procMessageBox       = user32.NewProc("MessageBoxW")
 	procSendMessage      = user32.NewProc("SendMessageW")
+	procSetWindowPos     = user32.NewProc("SetWindowPos")
 	procSetTimer         = user32.NewProc("SetTimer")
 	procKillTimer        = user32.NewProc("KillTimer")
 	procPostMessage      = user32.NewProc("PostMessageW")
+	procDestroyWindow    = user32.NewProc("DestroyWindow")
 	procOpenClipboard    = user32.NewProc("OpenClipboard")
 	procEmptyClipboard   = user32.NewProc("EmptyClipboard")
 	procSetClipboardData = user32.NewProc("SetClipboardData")
@@ -111,22 +134,33 @@ var (
 )
 
 type mainWindow struct {
-	hwnd          windows.Handle
-	controller    *Controller
-	controls      map[int]windows.Handle
-	uiMu          sync.Mutex
-	uiQueue       []func()
-	latestReport  string
-	latestSummary string
-	reportRoot    string
-	configSource  string
-	activeProfile string
-	admin         bool
-	startedAt     time.Time
+	hwnd            windows.Handle
+	controller      *Controller
+	controls        map[int]windows.Handle
+	uiMu            sync.Mutex
+	uiQueue         []func()
+	latestReport    string
+	latestSummary   string
+	reportRoot      string
+	configSource    string
+	activeProfile   string
+	admin           bool
+	startedAt       time.Time
+	relaunching     bool
+	elevatedChild   bool
+	currentWorkflow string
 }
 
 func runGUI() error {
-	w := &mainWindow{controls: map[int]windows.Handle{}, startedAt: time.Now()}
+	opts := parseGUIOptions(os.Args[1:])
+	guard, err := acquireSingleInstance(opts.AllowMultiple, opts.ElevatedChild)
+	if err != nil {
+		messageBox(0, err.Error(), "kigrepair GUI")
+		return err
+	}
+	defer guard.Release()
+
+	w := &mainWindow{controls: map[int]windows.Handle{}, startedAt: time.Now(), elevatedChild: opts.ElevatedChild}
 	uiDebug("UI startup started")
 	w.controller = NewController(nil, w.confirm)
 	w.controller.service = workflowservice.New(app.WorkflowOptions{ProgressSink: w.controller.ProgressSink()})
@@ -135,6 +169,9 @@ func runGUI() error {
 		w.configSource = effective.Metadata().Path
 		w.activeProfile = effective.Config.Profile
 		w.reportRoot = effective.Config.Reports.Root
+	}
+	if strings.TrimSpace(opts.Profile) != "" {
+		w.activeProfile = strings.TrimSpace(opts.Profile)
 	}
 	if strings.TrimSpace(w.reportRoot) == "" {
 		w.reportRoot = config.DefaultReportRoot
@@ -147,10 +184,11 @@ func (w *mainWindow) run() error {
 	className := utf16Ptr("KigrepairGuiWindow")
 	wndproc := syscall.NewCallback(w.windowProc)
 	wc := wndClassEx{
-		Size:      uint32(unsafe.Sizeof(wndClassEx{})),
-		WndProc:   wndproc,
-		Instance:  windows.Handle(instance),
-		ClassName: className,
+		Size:       uint32(unsafe.Sizeof(wndClassEx{})),
+		WndProc:    wndproc,
+		Instance:   windows.Handle(instance),
+		ClassName:  className,
+		Background: windows.Handle(colorWindow + 1),
 	}
 	if ret, _, err := procRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc))); ret == 0 {
 		return fmt.Errorf("RegisterClassExW failed: %w", err)
@@ -160,7 +198,7 @@ func (w *mainWindow) run() error {
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(utf16Ptr("kigrepair GUI MVP"))),
 		wsOverlapped|wsCaption|wsSysMenu|wsThickFrame|wsMinimizeBox|wsMaximizeBox|wsVisible,
-		80, 60, 1180, 840,
+		80, 60, minWindowWidth, minWindowHeight,
 		0, 0, instance, 0,
 	)
 	if hwnd == 0 {
@@ -168,6 +206,7 @@ func (w *mainWindow) run() error {
 	}
 	w.hwnd = windows.Handle(hwnd)
 	w.createControls()
+	w.layoutControls(minWindowWidth-16, minWindowHeight-39)
 	w.updateDashboard(InitialResultView())
 	procShowWindow.Call(hwnd, swShow)
 	procUpdateWindow.Call(hwnd)
@@ -190,12 +229,12 @@ func (w *mainWindow) run() error {
 }
 
 func (w *mainWindow) createControls() {
-	w.controls[idHeader] = createEdit(w.hwnd, "", 16, 12, 1148, 82, esMultiLine|esReadOnly)
+	w.controls[idHeader] = createEdit(w.hwnd, "", 16, 12, 1148, 82, esMultiLine|esReadOnly|wsVScroll)
 
-	createGroup(w.hwnd, "System Status", 16, 104, 1148, 146)
+	w.controls[idGroupSystem] = createGroup(w.hwnd, "System Status", 16, 104, 1148, 146)
 	w.controls[idSystem] = createEdit(w.hwnd, "", 32, 130, 1116, 104, esMultiLine|esReadOnly|wsVScroll)
 
-	createGroup(w.hwnd, "Quick Actions", 16, 260, 1148, 70)
+	w.controls[idGroupQuick] = createGroup(w.hwnd, "Quick Actions", 16, 260, 1148, 70)
 	createButton(w, idCheck, "Check", 32, 286, 100, 30)
 	createButton(w, idVerify, "Verify", 140, 286, 100, 30)
 	createButton(w, idCollect, "Collect Bundle", 248, 286, 130, 30)
@@ -203,33 +242,34 @@ func (w *mainWindow) createControls() {
 	createButton(w, idRestartAdmin, "Restart as Administrator", 564, 286, 190, 30)
 	createButton(w, idCancel, "Cancel", 762, 286, 100, 30)
 
-	createGroup(w.hwnd, "Repair Preparation", 16, 342, 720, 156)
-	createStatic(w.hwnd, "Installer path", 32, 370, 90, 22)
+	w.controls[idGroupRepair] = createGroup(w.hwnd, "Repair Preparation", 16, 342, 720, 156)
+	w.controls[idStaticInstaller] = createStatic(w.hwnd, "Installer path", 32, 370, 90, 22)
 	w.controls[idInstaller] = createEdit(w.hwnd, "", 126, 368, 476, 24, esAutoHScroll)
 	createButton(w, idBrowseInstaller, "Browse", 612, 366, 96, 28)
-	createStatic(w.hwnd, "Invite", 32, 404, 90, 22)
+	w.controls[idStaticInvite] = createStatic(w.hwnd, "Invite", 32, 404, 90, 22)
 	w.controls[idInvite] = createEdit(w.hwnd, "", 126, 402, 250, 24, esAutoHScroll|esPassword)
-	createStatic(w.hwnd, "Profile", 400, 404, 55, 22)
+	w.controls[idStaticProfile] = createStatic(w.hwnd, "Profile", 400, 404, 55, 22)
 	w.controls[idProfile] = createEdit(w.hwnd, emptyAs(w.activeProfile, "standard"), 458, 402, 150, 24, esAutoHScroll)
-	createStatic(w.hwnd, "Profiles: standard, conservative, diagnostic", 126, 434, 360, 22)
+	w.controls[idStaticProfiles] = createStatic(w.hwnd, "Profiles: standard, conservative, diagnostic", 126, 434, 360, 22)
 	createButton(w, idPreflight, "Preflight", 32, 460, 112, 28)
 	createButton(w, idRepairDryRun, "Repair Dry-Run", 154, 460, 140, 28)
 
-	createGroup(w.hwnd, "Danger Zone", 752, 342, 412, 156)
-	createStatic(w.hwnd, "Real repair modifies services, Defender exclusions, MSI state, and validated leftovers.", 770, 370, 370, 34)
-	createStatic(w.hwnd, "Requires Administrator, installer, invite, rollback snapshot, and exact YES.", 770, 408, 370, 22)
+	w.controls[idGroupDanger] = createGroup(w.hwnd, "Danger Zone", 752, 342, 412, 156)
+	w.controls[idStaticDanger1] = createStatic(w.hwnd, "Real repair modifies services, Defender exclusions, MSI state, and validated leftovers.", 770, 370, 370, 34)
+	w.controls[idStaticDanger2] = createStatic(w.hwnd, "Requires Administrator, installer, invite, rollback snapshot, and exact YES.", 770, 408, 370, 22)
 	createButton(w, idRepair, "RUN REAL REPAIR", 770, 448, 190, 38)
 
-	createGroup(w.hwnd, "Timeline", 16, 510, 720, 286)
+	w.controls[idGroupTimeline] = createGroup(w.hwnd, "Timeline", 16, 510, 720, 286)
 	w.controls[idTimeline] = createEdit(w.hwnd, "", 32, 536, 688, 244, esMultiLine|esReadOnly|wsVScroll)
 
-	createGroup(w.hwnd, "Details", 752, 510, 412, 286)
-	w.controls[idReports] = createEdit(w.hwnd, "", 768, 536, 380, 170, esMultiLine|esReadOnly|wsVScroll)
+	w.controls[idGroupDetails] = createGroup(w.hwnd, "Details", 752, 510, 412, 286)
+	w.controls[idReports] = createEdit(w.hwnd, "", 768, 536, 380, 170, esMultiLine|esReadOnly|wsVScroll|wsHScroll)
 	createButton(w, idOpenSelectedReport, "Open Summary", 768, 716, 124, 28)
 	createButton(w, idOpenOperations, "Open Operations", 900, 716, 128, 28)
-	createButton(w, idCopyReportPath, "Copy Report Path", 1036, 716, 112, 28)
+	createButton(w, idCopyReportPath, "Copy Report", 1036, 716, 112, 28)
 	createButton(w, idReportsList, "Reports List", 768, 752, 118, 28)
 	createButton(w, idReportsCleanupDry, "Cleanup Dry-Run", 894, 752, 144, 28)
+	createButton(w, idCopyBundlePath, "Copy Bundle", 1046, 752, 102, 28)
 	enable(w.controls[idCancel], false)
 	if w.admin {
 		enable(w.controls[idRestartAdmin], false)
@@ -247,6 +287,16 @@ func (w *mainWindow) windowProc(hwnd uintptr, msgID uint32, wparam uintptr, lpar
 		}
 		w.setRunningState(w.controller.IsRunning())
 		return 0
+	case wmSize:
+		width := int(lparam & 0xffff)
+		height := int((lparam >> 16) & 0xffff)
+		w.layoutControls(width, height)
+		return 0
+	case wmGetMinMaxInfo:
+		info := (*minMaxInfo)(unsafe.Pointer(lparam))
+		info.MinTrackSize.X = minWindowWidth
+		info.MinTrackSize.Y = minWindowHeight
+		return 0
 	case wmAppUI:
 		w.runQueuedUI()
 		return 0
@@ -261,6 +311,7 @@ func (w *mainWindow) windowProc(hwnd uintptr, msgID uint32, wparam uintptr, lpar
 }
 
 func (w *mainWindow) handleCommand(id int) {
+	defer w.watchUIAction(actionName(id), time.Now(), false)
 	switch id {
 	case idCheck:
 		w.runAction(ActionCheck)
@@ -323,6 +374,17 @@ func (w *mainWindow) handleCommand(id int) {
 			return
 		}
 		messageBox(w.hwnd, "Report path copied.", "kigrepair GUI")
+	case idCopyBundlePath:
+		bundle := w.controller.Latest().SupportBundlePath
+		if strings.TrimSpace(bundle) == "" {
+			w.showError("Support bundle path is not available yet. Run Collect Bundle first.")
+			return
+		}
+		if err := copyText(w.hwnd, bundle); err != nil {
+			w.showError(err.Error())
+			return
+		}
+		messageBox(w.hwnd, "Support bundle path copied.", "kigrepair GUI")
 	case idBrowseInstaller:
 		if path := openInstallerDialog(w.hwnd); path != "" {
 			setText(w.controls[idInstaller], path)
@@ -331,9 +393,7 @@ func (w *mainWindow) handleCommand(id int) {
 			}
 		}
 	case idRestartAdmin:
-		if err := winapi.RelaunchElevated(nil); err != nil {
-			w.showError(err.Error())
-		}
+		w.restartAsAdmin()
 	}
 }
 
@@ -365,6 +425,7 @@ func (w *mainWindow) RunWorkflow(name string, run func(ctx context.Context, sink
 	started := time.Now()
 	progressBefore := w.controller.ProgressCount()
 	uiDebug("workflow started: " + name)
+	w.currentWorkflow = name
 	w.setRunningState(true)
 	w.updateDashboard(ResultView{Status: "Running", Workflow: name})
 	go func() {
@@ -381,6 +442,7 @@ func (w *mainWindow) RunWorkflow(name string, run func(ctx context.Context, sink
 				w.UI(func() {
 					setText(w.controls[idInvite], "")
 					w.updateDashboard(w.controller.Latest())
+					w.currentWorkflow = ""
 					w.setRunningState(false)
 				})
 			}
@@ -401,6 +463,7 @@ func (w *mainWindow) RunWorkflow(name string, run func(ctx context.Context, sink
 		w.UI(func() {
 			setText(w.controls[idInvite], "")
 			w.updateDashboard(w.controller.Latest())
+			w.currentWorkflow = ""
 			w.setRunningState(false)
 		})
 	}()
@@ -441,12 +504,14 @@ func (w *mainWindow) updateDashboard(view ResultView) {
 		"support bundle: " + emptyAs(view.SupportBundlePath, "not available"),
 	}
 	setText(w.controls[idReports], strings.Join(reportLines, "\r\n"))
+	w.updateFileButtons(view)
 }
 
 func (w *mainWindow) updateTimelineFromProgress() {
 	view := w.controller.Latest()
+	view.Workflow = firstNonEmptyString(view.Workflow, w.currentWorkflow)
 	view.Timeline = w.controller.ProgressTimeline()
-	view.Timeline = AggregateTimelineWarnings(view.Timeline, nil, detailsFileForAggregation(view))
+	view.Timeline = SupportTimeline(view)
 	setText(w.controls[idTimeline], FormatTimeline(view.Timeline))
 }
 
@@ -458,7 +523,11 @@ func (w *mainWindow) setRunningState(running bool) {
 	if w.admin {
 		enable(w.controls[idRestartAdmin], false)
 	}
+	if w.relaunching {
+		enable(w.controls[idRestartAdmin], false)
+	}
 	enable(w.controls[idCancel], state.CancelEnabled)
+	w.updateFileButtons(w.controller.Latest())
 }
 
 func (w *mainWindow) confirm(ctx context.Context, req ConfirmationRequest) (bool, error) {
@@ -521,10 +590,47 @@ func (w *mainWindow) addLocalBlocking(reason string) {
 }
 
 func (w *mainWindow) openPathAsync(path string, missingMessage string) {
+	started := time.Now()
 	go func() {
 		if err := OpenPath(path); err != nil {
 			w.UI(func() { w.showError(missingMessage) })
 		}
+		w.watchUIAction("shell_open", started, true)
+	}()
+}
+
+func (w *mainWindow) restartAsAdmin() {
+	if w.admin || w.elevatedChild || w.relaunching {
+		return
+	}
+	if w.controller.IsRunning() {
+		w.showError("Wait for the current workflow to finish or cancel it before restarting as Administrator.")
+		return
+	}
+	if messageBoxYesNo(w.hwnd, "Restart kigrepair as Administrator?\r\n\r\nCurrent window will close.", "kigrepair GUI") != idYes {
+		return
+	}
+	w.relaunching = true
+	w.setRunningState(w.controller.IsRunning())
+	setText(w.controls[idInvite], "")
+	go func() {
+		args := []string{"--elevated-child", "--no-auto-workflow"}
+		if strings.TrimSpace(w.activeProfile) != "" {
+			args = append(args, "--profile", w.activeProfile)
+		}
+		err := winapi.RelaunchElevated(args)
+		if err != nil {
+			w.UI(func() {
+				w.relaunching = false
+				w.setRunningState(w.controller.IsRunning())
+				w.showError(err.Error())
+			})
+			return
+		}
+		w.UI(func() {
+			procKillTimer.Call(uintptr(w.hwnd), 1)
+			procDestroyWindow.Call(uintptr(w.hwnd))
+		})
 	}()
 }
 
@@ -595,6 +701,11 @@ func enable(hwnd windows.Handle, enabled bool) {
 
 func messageBox(parent windows.Handle, text, title string) {
 	procMessageBox.Call(uintptr(parent), uintptr(unsafe.Pointer(utf16Ptr(text))), uintptr(unsafe.Pointer(utf16Ptr(title))), 0)
+}
+
+func messageBoxYesNo(parent windows.Handle, text, title string) int {
+	ret, _, _ := procMessageBox.Call(uintptr(parent), uintptr(unsafe.Pointer(utf16Ptr(text))), uintptr(unsafe.Pointer(utf16Ptr(title))), mbYesNo)
+	return int(ret)
 }
 
 func uiDebug(message string) {
@@ -739,4 +850,102 @@ func copyText(owner windows.Handle, text string) error {
 		return fmt.Errorf("set clipboard data failed: %w", err)
 	}
 	return nil
+}
+
+func (w *mainWindow) layoutControls(width int, height int) {
+	if w == nil || len(w.controls) == 0 {
+		return
+	}
+	layout := computeMainLayout(width, height)
+	move(w.controls[idHeader], layout.Header)
+	move(w.controls[idGroupSystem], layout.SystemGroup)
+	move(w.controls[idSystem], layout.System)
+	move(w.controls[idGroupQuick], layout.QuickGroup)
+	move(w.controls[idGroupRepair], layout.RepairGroup)
+	move(w.controls[idGroupDanger], layout.DangerGroup)
+	move(w.controls[idGroupTimeline], layout.TimelineGroup)
+	move(w.controls[idTimeline], layout.Timeline)
+	move(w.controls[idGroupDetails], layout.DetailsGroup)
+	move(w.controls[idReports], layout.Details)
+	for id, r := range layout.Buttons {
+		move(w.controls[id], r)
+	}
+	for id, r := range layout.Labels {
+		move(w.controls[id], r)
+	}
+}
+
+func move(hwnd windows.Handle, r rect) {
+	if hwnd == 0 {
+		return
+	}
+	procSetWindowPos.Call(uintptr(hwnd), 0, uintptr(r.X), uintptr(r.Y), uintptr(r.W), uintptr(r.H), 0x0004)
+}
+
+func (w *mainWindow) updateFileButtons(view ResultView) {
+	reportAvailable := strings.TrimSpace(view.ReportDir) != ""
+	summaryAvailable := strings.TrimSpace(firstNonEmptyString(view.SummaryFile, filepathFromReport(view.ReportDir, "summary.txt"))) != ""
+	operationsAvailable := strings.TrimSpace(filepathFromReport(view.ReportDir, "operations.json")) != ""
+	bundleAvailable := strings.TrimSpace(view.SupportBundlePath) != ""
+	enable(w.controls[idOpenReports], true)
+	enable(w.controls[idOpenSelectedReport], reportAvailable && summaryAvailable)
+	enable(w.controls[idOpenOperations], reportAvailable && operationsAvailable)
+	enable(w.controls[idCopyReportPath], reportAvailable)
+	enable(w.controls[idCopyBundlePath], bundleAvailable)
+}
+
+func (w *mainWindow) watchUIAction(name string, started time.Time, async bool) {
+	elapsed := time.Since(started)
+	level := "ui_action"
+	if elapsed > 500*time.Millisecond {
+		level = "ui_handler_slow"
+	}
+	uiDebug(fmt.Sprintf("%s name=%s async=%t duration_ms=%d", level, name, async, elapsed.Milliseconds()))
+}
+
+func actionName(id int) string {
+	switch id {
+	case idCheck:
+		return "check"
+	case idVerify:
+		return "verify"
+	case idCollect:
+		return "collect_bundle"
+	case idReportsList:
+		return "reports_list"
+	case idOpenReports:
+		return "open_reports_folder"
+	case idBrowseInstaller:
+		return "browse_installer"
+	case idPreflight:
+		return "preflight"
+	case idRepairDryRun:
+		return "repair_dry_run"
+	case idRepair:
+		return "repair"
+	case idCancel:
+		return "cancel"
+	case idOpenSelectedReport:
+		return "open_summary"
+	case idReportsCleanupDry:
+		return "reports_cleanup_dry_run"
+	case idRestartAdmin:
+		return "restart_admin"
+	case idOpenOperations:
+		return "open_operations"
+	case idCopyReportPath:
+		return "copy_report_path"
+	case idCopyBundlePath:
+		return "copy_bundle_path"
+	default:
+		return fmt.Sprintf("command_%d", id)
+	}
+}
+
+type minMaxInfo struct {
+	Reserved     point
+	MaxSize      point
+	MaxPosition  point
+	MinTrackSize point
+	MaxTrackSize point
 }

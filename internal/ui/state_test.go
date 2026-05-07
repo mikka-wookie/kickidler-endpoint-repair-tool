@@ -128,6 +128,30 @@ func TestStartupViewDoesNotCallWorkflowService(t *testing.T) {
 	}
 }
 
+func TestMainLayoutHasMinimumSizeAndExpandingRegions(t *testing.T) {
+	minLayout := computeMainLayout(800, 600)
+	if minLayout.Header.W < minWindowWidth-32 {
+		t.Fatalf("header did not use minimum width: %#v", minLayout.Header)
+	}
+	wide := computeMainLayout(1400, 900)
+	if wide.Header.W <= minLayout.Header.W {
+		t.Fatalf("header did not expand: min=%#v wide=%#v", minLayout.Header, wide.Header)
+	}
+	if wide.Timeline.H <= minLayout.Timeline.H {
+		t.Fatalf("timeline did not expand vertically: min=%#v wide=%#v", minLayout.Timeline, wide.Timeline)
+	}
+	if wide.Details.W <= minLayout.Details.W {
+		t.Fatalf("details did not expand horizontally: min=%#v wide=%#v", minLayout.Details, wide.Details)
+	}
+}
+
+func TestGUIOptionsParseSafeRelaunchFlags(t *testing.T) {
+	opts := parseGUIOptions([]string{"--elevated-child", "--no-auto-workflow", "--profile", "diagnostic", "--allow-multiple"})
+	if !opts.ElevatedChild || !opts.NoAutoWorkflow || !opts.AllowMultiple || opts.Profile != "diagnostic" {
+		t.Fatalf("options = %#v", opts)
+	}
+}
+
 func TestBuildResultViewExtractsSupportFields(t *testing.T) {
 	resp := response("collect-report", "warning")
 	resp.Result = map[string]any{
@@ -242,6 +266,45 @@ func TestGUIConsumesWorkflowOutcomeForPrimaryStatus(t *testing.T) {
 	}
 	if view.OperationsFile == "" || view.PrimaryResultFile == "" {
 		t.Fatalf("file references missing: %#v", view)
+	}
+}
+
+func TestCollectReportWarningTimelineIsSupportReadable(t *testing.T) {
+	resp := response("collect-report", "warning")
+	resp.Errors = nil
+	resp.Warnings = []string{
+		"optional file missing: final-detection.json",
+		"optional file missing: repair-result.json",
+		"Wrote eventlogs/README.txt; event log collection is not implemented yet",
+	}
+	resp.Result = map[string]any{
+		"bundle_path": filepath.Join(resp.Meta.ReportDir, "kigrepair-support-bundle.zip"),
+		"classification": map[string]any{
+			"primary_issue": map[string]any{"code": "partial_msi_leftovers"},
+		},
+		"recommendation": map[string]any{
+			"primary_action": map[string]any{"code": "run_cleanup_dry_run"},
+		},
+	}
+	resp.Timeline = []app.OperationResult{
+		{Step: "collect.system", Status: app.OperationStatusSuccess, Message: "Wrote system/environment.json"},
+		{Step: "collect.services", Status: app.OperationStatusSuccess, Message: "Wrote system/services.json"},
+		{Step: "collect.eventlogs", Status: app.OperationStatusWarning, Message: "Wrote eventlogs/README.txt; event log collection is not implemented yet"},
+	}
+	view := BuildResultView(resp)
+	text := FormatTimeline(view.Timeline)
+	if strings.Contains(text, "Wrote system/environment.json") || strings.Contains(text, "Wrote system/services.json") {
+		t.Fatalf("raw collector entries leaked into timeline:\n%s", text)
+	}
+	if !strings.Contains(text, "Support bundle created with non-blocking warnings") {
+		t.Fatalf("missing non-fatal warning message:\n%s", text)
+	}
+	if strings.Count(text, "optional") > 1 {
+		t.Fatalf("optional warnings were not summarized:\n%s", text)
+	}
+	summary := FormatSystemStatus(view)
+	if !strings.Contains(summary, "Support bundle created") || strings.Contains(summary, "failed") {
+		t.Fatalf("collect warning summary is misleading:\n%s", summary)
 	}
 }
 
