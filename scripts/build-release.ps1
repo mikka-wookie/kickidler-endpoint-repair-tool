@@ -251,7 +251,7 @@ if ($IncludeGui) {
         try {
             $env:GOOS = "windows"
             $env:GOARCH = "amd64"
-            go build -trimpath -ldflags $ldflags -o $guiPath ./cmd/kigrepair-gui
+            go build -trimpath -ldflags "$ldflags -H windowsgui" -o $guiPath ./cmd/kigrepair-gui
         } finally {
             $env:GOOS = $oldGOOS
             $env:GOARCH = $oldGOARCH

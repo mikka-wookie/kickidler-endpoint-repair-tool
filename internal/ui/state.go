@@ -167,6 +167,16 @@ func (c *Controller) ProgressSink() app.ProgressSink {
 	return progressSink{controller: c}
 }
 
+func (c *Controller) ProgressCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.events)
+}
+
+func (c *Controller) ProgressTimeline() []TimelineItem {
+	return c.progressTimeline()
+}
+
 func (c *Controller) Run(parent context.Context, action Action, inputs Inputs) (ResultView, error) {
 	if c.service == nil {
 		return ResultView{}, errors.New("workflow service is not configured")

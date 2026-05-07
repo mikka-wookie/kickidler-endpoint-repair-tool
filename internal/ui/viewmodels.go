@@ -39,6 +39,19 @@ func BuildResultView(resp *app.WorkflowResponse) ResultView {
 	return view
 }
 
+func InitialResultView() ResultView {
+	return ResultView{
+		Status:   "Idle",
+		Workflow: "",
+		Timeline: []TimelineItem{{
+			Stage:   "startup",
+			Step:    "empty-state",
+			Status:  "info",
+			Message: "No workflow has been run yet. Start with Check.",
+		}},
+	}
+}
+
 func MapWorkflowResponseToGUIState(resp *app.WorkflowResponse) GUIState {
 	if resp == nil {
 		return GUIState{CurrentStatus: "Failed", BlockingReasons: []string{"Workflow returned no response."}}
@@ -60,6 +73,7 @@ func MapWorkflowResponseToGUIState(resp *app.WorkflowResponse) GUIState {
 	state.BlockingReasons = append(state.BlockingReasons, blockingReasonsFromErrors(resp.Errors)...)
 	state.BlockingReasons = dedupeStrings(state.BlockingReasons)
 	state.Warnings = dedupeStrings(state.Warnings)
+	normalizeSupportState(&state)
 	if state.Files.CleanupPlanFile == "" && state.Files.ReportDir != "" {
 		state.Files.CleanupPlanFile = filepath.Join(state.Files.ReportDir, "cleanup-plan.json")
 	}
@@ -295,6 +309,63 @@ func extractNestedStateSummary(state *GUIState, decoded map[string]any) {
 			}
 		}
 		state.BlockingReasons = append(state.BlockingReasons, blockingReasonsFromDecoded(source)...)
+	}
+}
+
+func normalizeSupportState(state *GUIState) {
+	if state == nil {
+		return
+	}
+	if title := issueTitle(state.PrimaryIssueCode); title != "" {
+		state.PrimaryIssueTitle = title
+	}
+	if title := recommendationTitle(firstNonEmptyString(state.RecommendationCode, state.RecommendationTitle)); title != "" && (state.RecommendationTitle == "" || strings.Contains(state.RecommendationTitle, "_")) {
+		state.RecommendationTitle = title
+	}
+	if state.RecommendationCode == "" {
+		state.RecommendationCode = recommendationCodeFromTitle(state.RecommendationTitle)
+	}
+	if state.CurrentStatus == "" {
+		state.CurrentStatus = "Idle"
+	}
+}
+
+func issueTitle(code string) string {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "partial_msi_leftovers":
+		return "MSI registry leftovers found"
+	case "service_binary_missing":
+		return "Service executable is missing"
+	case "service_stopped":
+		return "Grabber service is stopped"
+	default:
+		return ""
+	}
+}
+
+func recommendationTitle(code string) string {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "run_cleanup_dry_run", "cleanup_dry_run":
+		return "Run cleanup dry-run"
+	case "collect_bundle", "collect_report":
+		return "Collect support bundle"
+	case "run_repair":
+		return "Run repair"
+	default:
+		return ""
+	}
+}
+
+func recommendationCodeFromTitle(title string) string {
+	switch strings.ToLower(strings.TrimSpace(title)) {
+	case "run cleanup dry-run":
+		return "run_cleanup_dry_run"
+	case "collect support bundle":
+		return "collect_bundle"
+	case "run repair":
+		return "run_repair"
+	default:
+		return ""
 	}
 }
 

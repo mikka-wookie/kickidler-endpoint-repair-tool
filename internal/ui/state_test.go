@@ -88,6 +88,21 @@ func TestResultRenderingDoesNotExposeInvite(t *testing.T) {
 	assertNoInvite(t, view)
 }
 
+func TestStartupViewDoesNotCallWorkflowService(t *testing.T) {
+	svc := &fakeService{}
+	controller := NewController(svc, nil)
+	view := InitialResultView()
+	if len(svc.called) != 0 {
+		t.Fatalf("startup called workflows: %#v", svc.called)
+	}
+	if controller.IsRunning() {
+		t.Fatal("startup should not mark controller running")
+	}
+	if view.Status != "Idle" || !strings.Contains(FormatTimeline(view.Timeline), "Start with Check") {
+		t.Fatalf("unexpected startup view: %#v", view)
+	}
+}
+
 func TestBuildResultViewExtractsSupportFields(t *testing.T) {
 	resp := response("collect-report", "warning")
 	resp.Result = map[string]any{
@@ -150,6 +165,9 @@ func TestMapNotReadyRepairPlanToGUIState(t *testing.T) {
 	}
 	if state.PrimaryIssueCode != "partial_msi_leftovers" {
 		t.Fatalf("primary issue = %q", state.PrimaryIssueCode)
+	}
+	if state.PrimaryIssueTitle != "MSI registry leftovers found" {
+		t.Fatalf("primary issue title = %q", state.PrimaryIssueTitle)
 	}
 	if state.RecommendationTitle != "Run cleanup dry-run" {
 		t.Fatalf("recommendation = %q", state.RecommendationTitle)
